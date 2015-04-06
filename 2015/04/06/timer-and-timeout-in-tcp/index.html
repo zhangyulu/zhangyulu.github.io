@@ -1,0 +1,188 @@
+<!DOCTYPE HTML>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="chrome=1">
+  
+  <title>TCP中的几种超时和定时器 | ZhangYulu&#39;s Blog</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  
+    <meta name="author" content="Zhang Yulu">
+  
+  
+    <meta name="description" content="最近重新翻阅了一下Stevens的《TCP/IP详解》，发现不少知识点之前没有理解透彻，或者过了太久已经没有印象了，因此决定花一些时间来整理和记录下来。
+超时重传在TCP中重传可能发生在2种情况下：快速重传和超时重传。超时重传指的是，当发送到对方的报文段在一定超时时间之内，仍没有收到对方的Ack，则重新发送该报文段。那么问题来了，超时时间是怎么决定的？如果超时时间太长，报文丢失之后很久才重发，效率">
+  
+  <meta name="description" content="最近重新翻阅了一下Stevens的《TCP/IP详解》，发现不少知识点之前没有理解透彻，或者过了太久已经没有印象了，因此决定花一些时间来整理和记录下来。
+超时重传在TCP中重传可能发生在2种情况下：快速重传和超时重传。超时重传指的是，当发送到对方的报文段在一定超时时间之内，仍没有收到对方的Ack，则重新发送该报文段。那么问题来了，超时时间是怎么决定的？如果超时时间太长，报文丢失之后很久才重发，效率">
+<meta property="og:type" content="article">
+<meta property="og:title" content="TCP中的几种超时和定时器">
+<meta property="og:url" content="http://yoursite.com/2015/04/06/timer-and-timeout-in-tcp/index.html">
+<meta property="og:site_name" content="ZhangYulu's Blog">
+<meta property="og:description" content="最近重新翻阅了一下Stevens的《TCP/IP详解》，发现不少知识点之前没有理解透彻，或者过了太久已经没有印象了，因此决定花一些时间来整理和记录下来。
+超时重传在TCP中重传可能发生在2种情况下：快速重传和超时重传。超时重传指的是，当发送到对方的报文段在一定超时时间之内，仍没有收到对方的Ack，则重新发送该报文段。那么问题来了，超时时间是怎么决定的？如果超时时间太长，报文丢失之后很久才重发，效率">
+<meta property="og:image" content="http://7xifpb.com1.z0.glb.clouddn.com/tcp_rtt_estimate.svg">
+<meta property="og:image" content="http://7xifpb.com1.z0.glb.clouddn.com/screenshot_persist_timer.png">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="TCP中的几种超时和定时器">
+<meta name="twitter:description" content="最近重新翻阅了一下Stevens的《TCP/IP详解》，发现不少知识点之前没有理解透彻，或者过了太久已经没有印象了，因此决定花一些时间来整理和记录下来。
+超时重传在TCP中重传可能发生在2种情况下：快速重传和超时重传。超时重传指的是，当发送到对方的报文段在一定超时时间之内，仍没有收到对方的Ack，则重新发送该报文段。那么问题来了，超时时间是怎么决定的？如果超时时间太长，报文丢失之后很久才重发，效率">
+  
+    <link rel="alternate" href="/atom.xml" title="ZhangYulu&#39;s Blog" type="application/atom+xml">
+  
+  
+  <link rel="stylesheet" href="/css/style.css" type="text/css">
+  <!--[if lt IE 9]><script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script><![endif]-->
+  
+</head>
+
+<body>
+  <div class="wrapper">
+    <header id="header">
+  <div class="title">
+    <h1><a href="/">ZhangYulu&#39;s Blog</a></h1>
+    <p><a href="/"></a></p>
+  </div>
+  <nav class="nav">
+    <ul>
+      
+        <li><a href="/">首页</a></li>
+      
+        <li><a href="/archives">文章归档</a></li>
+      
+        <li><a href="/links">友情链接</a></li>
+      
+      
+        <li><a href="/atom.xml">RSS</a></li>
+      
+    </ul>
+    <div class="clearfix"></div>
+  </nav>
+  <div class="clearfix"></div>
+</header>
+    <div class="content"><article class="post">
+  <header>
+    
+      <div class="icon"></div>
+      <a href="/2015/04/06/timer-and-timeout-in-tcp/">
+  <time datetime="2015-04-06T13:21:51.000Z">
+    4月 6 2015
+  </time>
+</a>
+    
+    
+  
+    <h1 class="title">TCP中的几种超时和定时器</h1>
+  
+
+  </header>
+  
+  <div class="entry">
+    
+      <p>最近重新翻阅了一下Stevens的《TCP/IP详解》，发现不少知识点之前没有理解透彻，或者过了太久已经没有印象了，因此决定花一些时间来整理和记录下来。</p>
+<h3 id="超时重传">超时重传</h3><p>在TCP中重传可能发生在2种情况下：<a href="http://en.wikipedia.org/wiki/Fast_retransmit" target="_blank" rel="external">快速重传</a>和超时重传。超时重传指的是，当发送到对方的报文段在一定超时时间之内，仍没有收到对方的Ack，则重新发送该报文段。<br>那么问题来了，超时时间是怎么决定的？如果超时时间太长，报文丢失之后很久才重发，效率和吞吐率太低；时间太短，可能某些报文只是延迟到达，并没有丢失，重传又会增加网络负载，可能造成网络拥塞。因此，在不同的网络环境下，甚至在相同网络的不同时间段下，均需要动态地计算超时时间。<br>通过<code>RTT（Round Trip Time）</code>可以大致决定，在多长时间之内没有收到Ack，则认为该报文丢失，并重传该报文。然而，网络环境随时在变化，我们没有办法准确的确定一个报文的RTT，只能通过多次采样来估算。</p>
+<h4 id="RTT的测量和估算">RTT的测量和估算</h4><p>为了尽量准确地估算下一次报文的RTT，TCP需要对已经发送出去报文的RTT进行采样。对于每个连接，在发送数据时，保证全局有一个定时器正在运行（如果发送数据时已经有定时器在运行，则不对该报文进行计时）。</p>
+<a id="more"></a>
+<h5 id="原始算法">原始算法</h5><p>最初的TCP规范[<a href="http://www.ietf.org/rfc/rfc0793.txt" target="_blank" rel="external">RFC0793</a>]使用如下公式估算RTT：</p>
+<blockquote>
+<p>SRTT = α(SRTT) + (1 − α) M</p>
+</blockquote>
+<p><code>SRTT(Smoothed RTT estimator)</code>指平滑后的RTT估算值，α为平滑因子，推荐值为0.9，M为实际测量的RTT值。该算法预测的RTT值90%来自于前一个RTT，10%来自新的测量值。重传超时<code>RTO(Retransmission Timeout)</code>的值设置为</p>
+<blockquote>
+<p> RTO = min(ubound, max(lbound, β* SRTT))</p>
+</blockquote>
+<p>ubound和lbound分别RTO的上限和下限，β的推荐值为2。</p>
+<h5 id="Jacobson/Karels算法">Jacobson/Karels算法</h5><p>上述算法的缺点在于，在网络环境突然发生较大变化时，该算法无法跟上这种变化，及时进行相应的调整，因为估算的RTO值只有10%来自于新的测量值。例如，某个中间路由器发生故障导致吞吐率降低，该算法还是会在相对短的时间内重传，继续增加网络负载，是一种雪上加霜的行为。<br>因此，有人提出一种新的算法，除了计算平滑的RTT值之外，还要计算RTT的变化幅度，RTO根据这两个值来进行确定。这就是Jacobson/Karels算法[<a href="http://tools.ietf.org/html/rfc6298" target="_blank" rel="external">RFC6298</a>]，该算法具体如下：</p>
+<blockquote>
+<p>SRTT = (1 - g)(SRTT) + (g)M<br>RTTval = (1 - h)(RTTval) + (h)( | M - SRTT | )<br>RTO = SRTT+ 4(RTTval)<br>其中g的推荐值为0.125，h的推荐值为0.25</p>
+</blockquote>
+<p>SRTT的计算方法不变，但是该算法还需要计算RTT的加权移动平均值RTTval，该值是被平滑后的RTT测量值与SRTT之差（取绝对值），类似于方差但是计算方法更简单，用于表示RTT的变化幅度。该算法能够更快地跟上网络环境的变化，并做出相应的调整。<br>那如果SYN报文超时怎么办？此时还没有能够对RTT进行采样，无法根据上述算法计算得出。因此，RFC6298指出，RTO初始值设置为1s。如果第一个SYN报文超时，以该RTO值进行指数退避的同时，将数据传输阶段的RTO初始值设置为3s。<br>取得第一个RTT采样值M后，对算法进行如下初始化：</p>
+<blockquote>
+<p>SRTT = M<br>RTTval = M / 2</p>
+</blockquote>
+<p>此后，便根据该值和后续RTT采样值来进行后续的计算。</p>
+<h5 id="重传二义性和Karn算法">重传二义性和Karn算法</h5><p>这样做有一个问题，如下图所示，可能会有两种情况，而我们无法判断到底是哪一种：<br><img src="http://7xifpb.com1.z0.glb.clouddn.com/tcp_rtt_estimate.svg" alt="tcp_rtt_estimate.svg"></p>
+<ul>
+<li>第一次发送的报文丢失，超时重传后，收到对方的Ack</li>
+<li>由于网络原因，第一次发送的报文延迟到达，接收方对延迟到达的Ack进行确认，随后收到重传的报文并丢弃</li>
+</ul>
+<p>因此，Karn算法指出，一旦发生重传，则不对该报文的RTT进行采样。但是如果网络突然出现故障，导致所有报文的实际RTT大于当前的RTO，则每个报文都会发生重传，同时，又因为不能对重传的报文进行RTT采样，因此也无法更新RTO，这就陷入了僵局，而对每个报文都重传毫无疑问会很大程度上给网络增加没必要的负载，使得网络情况更差。为了避免这种情况，Karn算法的第二点，就是在发生超时重传的情况下，对RTO进行<code>指数退避(exponential backoff)</code>，每次进行重传就将当前RTO翻倍，直到下一次没有重传就收到对方的Ack，才根据测量的RTT和SRTT重新计算RTO。这样做的目的在于，消除重传二义性的同时，根据网络环境的变化及时调整RTO，防止进一步使网络过载。发生重传后，在将RTO进行指数退避的同时，触发<code>拥塞避免算法</code>，将thresh值置为当前拥塞窗口的一半，再将拥塞窗口置为1，重新进行慢启动。</p>
+<h5 id="超时重传次数">超时重传次数</h5><p>上面讨论了重传的超时时间，但是如果网络出现故障，或者对端主机崩溃，使得报文始终无法发送到对端，当然不可能无限地重传下去，因此，需由系统指定重传次数上限。在Linux下，这个上限是可以配置的，由/proc/sys/net/ipv4目录下的tcp_retries1, tcp_retries2和tcp_syn_retries三个文件指定。</p>
+<ul>
+<li>tcp_retries1: 重传该文件指定次数之后，则要求网络层更新路由表。默认值为3</li>
+<li>tcp_retries2: 重传该文件指定次数之后，放弃传输，即最大重传次数。默认值为15</li>
+<li>tcp_syn_retries: 指定syn报文的重传次数。默认值为5（但是在Ubuntu 14.04下查看该值默认为6）</li>
+</ul>
+<h3 id="坚持定时器">坚持定时器</h3><p>说完了超时重传的定时器，我们来看一下TCP的<code>坚持定时器(persist timer)</code>。</p>
+<p>我们知道，由于TCP的滑动窗口协议，如果接收方向发送方通告的窗口大小为0（例如当接收方应用程序来不及读取接受缓冲区中的数据，导致接受缓冲区占满），那么发送方就不能继续发送数据。当接收方应用程序读取一部分数据，使得滑动窗口不为0时，接收方会向发送方发送一个Ack，这个Ack不确认任何数据，只是告诉新的窗口大小，因此也被称为<code>窗口更新</code>。<br>但是，这个Ack报文段中不带任何数据，所以不会有任何超时重传的机制来保证该Ack可靠送达。如果这个Ack丢失了，双方岂不是都陷入了无限的等待？发送方等待接收方的窗口更新，接收方等待发送方的数据。<br>为了避免这个问题，TCP引入了坚持定时器。当发送方在一定时间内没有收到接收方的窗口更新，坚持定时器超时后，会主动向接收方询问当前窗口，这个过程也叫<code>窗口探测(Window Probes)</code>，窗口探测其实就是一个包含0字节或1字节数据的报文段。《TCP/IP详解》中写的是1字节，但是在Ubuntu 14.04下实测为0字节，可能是不同的实现方法。接收方收到这个报文后，会向发送方回复Ack，其中包含当前的窗口大小。这个Ack可能会确认该1字节的数据（如果探测报文包含数据的话），也可能不会，这取决与接收方当前的接收缓冲区占用情况。<br>坚持定时器的首次超时时间为当前RTO，随后进行指数退避（超时时间存在最大上限，在Ubuntu 14.04下，超时时间最大值为120s），直到接收方通告的窗口大小不为0。<br>抓包结果如下：<br><img src="http://7xifpb.com1.z0.glb.clouddn.com/screenshot_persist_timer.png" alt="packet capture"></p>
+<p>可以看到，在最开始，超时时间以指数退避的方式进行增加，直到该值达到120s之后保持不变。《TCP/IP详解》中说：</p>
+<blockquote>
+<p>An important difference, however, is that a normal TCP never gives up sending window probes, whereas it may eventually give up trying to perform retransmissions</p>
+</blockquote>
+<p>发送方不会放弃窗口探测，但是从截图中可以看出，在接收方收到一定次数的窗口探测，而应用程序始终没有读取数据时，会向发送方发送RST报文重置连接。</p>
+<h3 id="保活定时器">保活定时器</h3><p>如果连接处于空闲状态，较长时间内没有进行数据交互，如果连接双方任意一方崩溃或发生故障（如掉电或网线拔出等情况，来不及向对端发送FIN或RST），对方是无法感知到的。如果对方确实已经发生故障，则应该关闭该连接，并回收相应的资源，对于并发连接数较大的服务器程序来说，这一点很重要。TCP使用<a href="http://en.wikipedia.org/wiki/Keepalive#TCP_keepalive" target="_blank" rel="external">保活定时器(Keep Alive Timer)</a>来做到这一点。<br>在默认情况下，TCP的保活定时器超时时间为2小时（在Linux下由/proc/sys/net/ipv4/tcp_keepalive_time文件指定），但是每次接收到来自对端发送过来报文，都会将该定时器复位。保活定时器的探测报文是不带任何数据，其中SYN字段比下一个发送的序列号小1。例如，如果本端下一次要发送的序列号为10（即对端上一次回复的Ack是10），那么这个探测报文的Ack是9。正是由于这个不正确的Ack，使得对端对该报文进行响应（该响应中Ack字段为10），表明它期望接收的是10而不是9。<br>保活探测报文也有超时时间和重传次数的，Linux下分别由/proc/sys/net/ipv4/tcp_keepalive_intvl和/proc/sys/net/ipv4/tcp_keepalive_probes指定，默认值分别为75s和9次。如果对方始终没有对该探测报文进行响应，就向对端发送RST报文，同时将该连接重置。</p>
+
+    
+  </div>
+  <footer>
+    
+      
+      
+  <div class="tags">
+    <a class="tags-link" href="/tags/TCP-IP/">TCP/IP</a>
+  </div>
+
+    
+    <div class="clearfix"></div>
+  </footer>
+</article>
+
+
+<section id="comment">
+  <h1 class="title">评论</h1>
+  <div class="ds-thread" data-title="TCP中的几种超时和定时器">
+  </div>
+</section>
+</div>
+  </div>
+  <footer id="footer"><div class="copyright">
+  
+  &copy; 2015 <a href="/">Zhang Yulu</a>
+  
+</div>
+<div class="theme-copyright">
+  Theme by <a href="https://github.com/orderedlist" target="_blank">orderedlist</a>
+   | 
+  Redesign by <a href="http://heroicyang.com/" target="_blank">Heroic Yang</a>
+</div>
+<div class="clearfix"></div></footer>
+  <script src="//ajax.googleapis.com/ajax/libs/jquery/1.8/jquery.min.js"></script>
+<script src="/js/scale.fix.js"></script>
+<script src="/js/jquery.imagesloaded.min.js"></script>
+<script src="/js/gallery.js"></script>
+
+
+<script type="text/javascript">
+  var duoshuoQuery = { short_name: 'zhangyulublog' };
+  (function() {
+    var ds = document.createElement('script');
+    ds.type = 'text/javascript';
+    ds.async = true;
+    ds.src = 'http://static.duoshuo.com/embed.js';
+    ds.charset = 'UTF-8';
+    (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(ds);
+  })();
+</script>
+
+
+
+<link rel="stylesheet" href="/fancybox/jquery.fancybox.css" media="screen" type="text/css">
+<script src="/fancybox/jquery.fancybox.pack.js"></script>
+<script type="text/javascript">
+  (function($){
+    $('.fancybox').fancybox();
+  })(jQuery);
+</script>
+
+</body>
+</html>

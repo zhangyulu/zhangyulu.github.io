@@ -1,0 +1,239 @@
+<!DOCTYPE HTML>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="chrome=1">
+  
+  <title>ZhangYulu&#39;s Blog</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  
+    <meta name="author" content="Zhang Yulu">
+  
+  
+  <meta name="description">
+<meta property="og:type" content="website">
+<meta property="og:title" content="ZhangYulu's Blog">
+<meta property="og:url" content="http://yoursite.com/index.html">
+<meta property="og:site_name" content="ZhangYulu's Blog">
+<meta property="og:description">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="ZhangYulu's Blog">
+<meta name="twitter:description">
+  
+    <link rel="alternate" href="/atom.xml" title="ZhangYulu&#39;s Blog" type="application/atom+xml">
+  
+  
+  <link rel="stylesheet" href="/css/style.css" type="text/css">
+  <!--[if lt IE 9]><script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script><![endif]-->
+  
+</head>
+
+<body>
+  <div class="wrapper">
+    <header id="header">
+  <div class="title">
+    <h1><a href="/">ZhangYulu&#39;s Blog</a></h1>
+    <p><a href="/"></a></p>
+  </div>
+  <nav class="nav">
+    <ul>
+      
+        <li><a href="/">首页</a></li>
+      
+        <li><a href="/archives">文章归档</a></li>
+      
+        <li><a href="/links">友情链接</a></li>
+      
+      
+        <li><a href="/atom.xml">RSS</a></li>
+      
+    </ul>
+    <div class="clearfix"></div>
+  </nav>
+  <div class="clearfix"></div>
+</header>
+    <div class="content">
+
+
+
+
+  
+    <article class="post">
+  <header>
+    
+      <div class="icon"></div>
+      <a href="/2015/04/06/timer-and-timeout-in-tcp/">
+  <time datetime="2015-04-06T13:21:51.000Z">
+    4月 6 2015
+  </time>
+</a>
+    
+    
+  
+    <h1 class="title"><a href="/2015/04/06/timer-and-timeout-in-tcp/">TCP中的几种超时和定时器</a></h1>
+  
+
+  </header>
+  
+  <div class="entry">
+    
+      <p>最近重新翻阅了一下Stevens的《TCP/IP详解》，发现不少知识点之前没有理解透彻，或者过了太久已经没有印象了，因此决定花一些时间来整理和记录下来。</p>
+<h3 id="超时重传">超时重传</h3><p>在TCP中重传可能发生在2种情况下：<a href="http://en.wikipedia.org/wiki/Fast_retransmit">快速重传</a>和超时重传。超时重传指的是，当发送到对方的报文段在一定超时时间之内，仍没有收到对方的Ack，则重新发送该报文段。<br>那么问题来了，超时时间是怎么决定的？如果超时时间太长，报文丢失之后很久才重发，效率和吞吐率太低；时间太短，可能某些报文只是延迟到达，并没有丢失，重传又会增加网络负载，可能造成网络拥塞。因此，在不同的网络环境下，甚至在相同网络的不同时间段下，均需要动态地计算超时时间。<br>通过<code>RTT（Round Trip Time）</code>可以大致决定，在多长时间之内没有收到Ack，则认为该报文丢失，并重传该报文。然而，网络环境随时在变化，我们没有办法准确的确定一个报文的RTT，只能通过多次采样来估算。</p>
+<h4 id="RTT的测量和估算">RTT的测量和估算</h4><p>为了尽量准确地估算下一次报文的RTT，TCP需要对已经发送出去报文的RTT进行采样。对于每个连接，在发送数据时，保证全局有一个定时器正在运行（如果发送数据时已经有定时器在运行，则不对该报文进行计时）。</p>
+    
+  </div>
+  <footer class="end-sep">
+    
+      
+        <div class="alignleft">
+          <a href="/2015/04/06/timer-and-timeout-in-tcp/#more" class="more-link">阅读全文</a>
+        </div>
+      
+      
+    
+    <div class="clearfix"></div>
+  </footer>
+</article>
+
+
+  
+    <article class="post">
+  <header>
+    
+      <div class="icon"></div>
+      <a href="/2015/03/19/sending-and-receiving-in-tcp/">
+  <time datetime="2015-03-19T02:18:32.000Z">
+    3月 19 2015
+  </time>
+</a>
+    
+    
+  
+    <h1 class="title"><a href="/2015/03/19/sending-and-receiving-in-tcp/">TCP报文的发送</a></h1>
+  
+
+  </header>
+  
+  <div class="entry">
+    
+      <p>在TCP/IP网络协议栈中，数据的可靠传输、流量控制和拥塞控制均由传输层的TCP协议来负责。对上层应用层来说，TCP提供的是流式数据传输，而实际的传输细节却对上层透明。我们看看TCP收发消息到底经过了哪些过程。</p>
+<p>首先了解量两个概念：MTU和MSS。</p>
+<blockquote>
+<p>最大传输单元(Maximum Transmission Unit，MTU)是链路层的一个参数，是指一种通信协议的某一层上面所能通过的最大数据包大小（以字节为单位）。</p>
+</blockquote>
+<p>无论哪种数据链路，对该链路上网络分组的大小都会有限制，即MTU的值，例如最常见的以太网MTU为1500字节。当TCP层试图在以太网上发送报文段，调用IP层的方法时，会自动获取当前链路层的MTU，如果发现数据包长度大于MTU，则必须将数据包分片以达到要求，每个分片具有独立的IP报头，即可认为是独立的IP数据包。接收方根据IP报头，将所有IP数据包组成为一个TCP报文段。<br>如果一个TCP报文段的数据被分片成多个IP数据包，任何一个IP数据包丢失，则认为整个TCP报文段丢失，需要重新传输。这样做是很低效的，因此，传输层使用了另外一个参数MSS，尽量减少这种分片的产生。</p>
+    
+  </div>
+  <footer class="end-sep">
+    
+      
+        <div class="alignleft">
+          <a href="/2015/03/19/sending-and-receiving-in-tcp/#more" class="more-link">阅读全文</a>
+        </div>
+      
+      
+    
+    <div class="clearfix"></div>
+  </footer>
+</article>
+
+
+  
+    <article class="post">
+  <header>
+    
+      <div class="icon"></div>
+      <a href="/2015/03/13/backlog-of-tcp-in-linux/">
+  <time datetime="2015-03-13T14:13:19.000Z">
+    3月 13 2015
+  </time>
+</a>
+    
+    
+  
+    <h1 class="title"><a href="/2015/03/13/backlog-of-tcp-in-linux/">浅谈TCP的backlog</a></h1>
+  
+
+  </header>
+  
+  <div class="entry">
+    
+      <p>在Linux/Unix下，应用程序调用<code>listen</code>系统调用进行监听时，需要指定一个int类型的backlog参数。<a href="http://linux.die.net/man/2/listen">man手册</a>中的描述为:</p>
+<blockquote>
+<p>The backlog argument defines the maximum length to which the queue of pending connections for sockfd may grow</p>
+</blockquote>
+<p>通常可以理解为待建立的连接数上限。</p>
+<p>首先来回顾一下TCP建立连接过程的三次握手</p>
+<ol>
+<li>客户端调用connect，向服务器发送SYN报文，服务器收到后将该连接状态记录为<code>SYN Reveived</code>；</li>
+<li>服务器向客户端回复SYN/ACK报文；</li>
+<li>服务器收到客户端发送过来的ACK报文，该连接成功建立，状态为<code>ESTABLISHED</code>，等待应用程序调用accept。</li>
+</ol>
+<p>因此，服务器需要使用某种方式在保存当前所有待建立和已建立的连接信息，这就是真正意义上的backlog。</p>
+    
+  </div>
+  <footer class="end-sep">
+    
+      
+        <div class="alignleft">
+          <a href="/2015/03/13/backlog-of-tcp-in-linux/#more" class="more-link">阅读全文</a>
+        </div>
+      
+      
+    
+    <div class="clearfix"></div>
+  </footer>
+</article>
+
+
+  
+
+  <nav id="pagination">
+  
+  
+  <div class="clearfix"></div>
+</nav>
+
+</div>
+  </div>
+  <footer id="footer"><div class="copyright">
+  
+  &copy; 2015 <a href="/">Zhang Yulu</a>
+  
+</div>
+<div class="theme-copyright">
+  Theme by <a href="https://github.com/orderedlist" target="_blank">orderedlist</a>
+   | 
+  Redesign by <a href="http://heroicyang.com/" target="_blank">Heroic Yang</a>
+</div>
+<div class="clearfix"></div></footer>
+  <script src="//ajax.googleapis.com/ajax/libs/jquery/1.8/jquery.min.js"></script>
+<script src="/js/scale.fix.js"></script>
+<script src="/js/jquery.imagesloaded.min.js"></script>
+<script src="/js/gallery.js"></script>
+
+
+<script type="text/javascript">
+  var duoshuoQuery = { short_name: 'zhangyulublog' };
+  (function() {
+    var ds = document.createElement('script');
+    ds.type = 'text/javascript';
+    ds.async = true;
+    ds.src = 'http://static.duoshuo.com/embed.js';
+    ds.charset = 'UTF-8';
+    (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(ds);
+  })();
+</script>
+
+
+
+<link rel="stylesheet" href="/fancybox/jquery.fancybox.css" media="screen" type="text/css">
+<script src="/fancybox/jquery.fancybox.pack.js"></script>
+<script type="text/javascript">
+  (function($){
+    $('.fancybox').fancybox();
+  })(jQuery);
+</script>
+
+</body>
+</html>

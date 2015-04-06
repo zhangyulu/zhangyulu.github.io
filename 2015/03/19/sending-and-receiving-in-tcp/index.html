@@ -1,0 +1,182 @@
+<!DOCTYPE HTML>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="chrome=1">
+  
+  <title>TCP报文的发送 | ZhangYulu&#39;s Blog</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  
+    <meta name="author" content="Zhang Yulu">
+  
+  
+    <meta name="description" content="在TCP/IP网络协议栈中，数据的可靠传输、流量控制和拥塞控制均由传输层的TCP协议来负责。对上层应用层来说，TCP提供的是流式数据传输，而实际的传输细节却对上层透明。我们看看TCP收发消息到底经过了哪些过程。
+首先了解量两个概念：MTU和MSS。
+
+最大传输单元(Maximum Transmission Unit，MTU)是链路层的一个参数，是指一种通信协议的某一层上面所能通过的最大数据包大小（">
+  
+  <meta name="description" content="在TCP/IP网络协议栈中，数据的可靠传输、流量控制和拥塞控制均由传输层的TCP协议来负责。对上层应用层来说，TCP提供的是流式数据传输，而实际的传输细节却对上层透明。我们看看TCP收发消息到底经过了哪些过程。
+首先了解量两个概念：MTU和MSS。
+
+最大传输单元(Maximum Transmission Unit，MTU)是链路层的一个参数，是指一种通信协议的某一层上面所能通过的最大数据包大小（">
+<meta property="og:type" content="article">
+<meta property="og:title" content="TCP报文的发送">
+<meta property="og:url" content="http://yoursite.com/2015/03/19/sending-and-receiving-in-tcp/index.html">
+<meta property="og:site_name" content="ZhangYulu's Blog">
+<meta property="og:description" content="在TCP/IP网络协议栈中，数据的可靠传输、流量控制和拥塞控制均由传输层的TCP协议来负责。对上层应用层来说，TCP提供的是流式数据传输，而实际的传输细节却对上层透明。我们看看TCP收发消息到底经过了哪些过程。
+首先了解量两个概念：MTU和MSS。
+
+最大传输单元(Maximum Transmission Unit，MTU)是链路层的一个参数，是指一种通信协议的某一层上面所能通过的最大数据包大小（">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="TCP报文的发送">
+<meta name="twitter:description" content="在TCP/IP网络协议栈中，数据的可靠传输、流量控制和拥塞控制均由传输层的TCP协议来负责。对上层应用层来说，TCP提供的是流式数据传输，而实际的传输细节却对上层透明。我们看看TCP收发消息到底经过了哪些过程。
+首先了解量两个概念：MTU和MSS。
+
+最大传输单元(Maximum Transmission Unit，MTU)是链路层的一个参数，是指一种通信协议的某一层上面所能通过的最大数据包大小（">
+  
+    <link rel="alternate" href="/atom.xml" title="ZhangYulu&#39;s Blog" type="application/atom+xml">
+  
+  
+  <link rel="stylesheet" href="/css/style.css" type="text/css">
+  <!--[if lt IE 9]><script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script><![endif]-->
+  
+</head>
+
+<body>
+  <div class="wrapper">
+    <header id="header">
+  <div class="title">
+    <h1><a href="/">ZhangYulu&#39;s Blog</a></h1>
+    <p><a href="/"></a></p>
+  </div>
+  <nav class="nav">
+    <ul>
+      
+        <li><a href="/">首页</a></li>
+      
+        <li><a href="/archives">文章归档</a></li>
+      
+        <li><a href="/links">友情链接</a></li>
+      
+      
+        <li><a href="/atom.xml">RSS</a></li>
+      
+    </ul>
+    <div class="clearfix"></div>
+  </nav>
+  <div class="clearfix"></div>
+</header>
+    <div class="content"><article class="post">
+  <header>
+    
+      <div class="icon"></div>
+      <a href="/2015/03/19/sending-and-receiving-in-tcp/">
+  <time datetime="2015-03-19T02:18:32.000Z">
+    3月 19 2015
+  </time>
+</a>
+    
+    
+  
+    <h1 class="title">TCP报文的发送</h1>
+  
+
+  </header>
+  
+  <div class="entry">
+    
+      <p>在TCP/IP网络协议栈中，数据的可靠传输、流量控制和拥塞控制均由传输层的TCP协议来负责。对上层应用层来说，TCP提供的是流式数据传输，而实际的传输细节却对上层透明。我们看看TCP收发消息到底经过了哪些过程。</p>
+<p>首先了解量两个概念：MTU和MSS。</p>
+<blockquote>
+<p>最大传输单元(Maximum Transmission Unit，MTU)是链路层的一个参数，是指一种通信协议的某一层上面所能通过的最大数据包大小（以字节为单位）。</p>
+</blockquote>
+<p>无论哪种数据链路，对该链路上网络分组的大小都会有限制，即MTU的值，例如最常见的以太网MTU为1500字节。当TCP层试图在以太网上发送报文段，调用IP层的方法时，会自动获取当前链路层的MTU，如果发现数据包长度大于MTU，则必须将数据包分片以达到要求，每个分片具有独立的IP报头，即可认为是独立的IP数据包。接收方根据IP报头，将所有IP数据包组成为一个TCP报文段。<br>如果一个TCP报文段的数据被分片成多个IP数据包，任何一个IP数据包丢失，则认为整个TCP报文段丢失，需要重新传输。这样做是很低效的，因此，传输层使用了另外一个参数MSS，尽量减少这种分片的产生。</p>
+<a id="more"></a>
+<blockquote>
+<p>最大分段大小（Maximum Segment Size，MSS）是传输控制协议的一个参数，以字节数定义一个计算机或通信设备所能接受的分段的最大数据量。它并不会计算TCP或IP协议头的大小。</p>
+</blockquote>
+<p>在以太网中，MTU为1500，减去TCP和IP的报头各20字节，则当前的MSS大小为1460字节。MSS是在TCP的三次握手中协商决定的，SYN报文中包含自身当前的MSS。然而，这个MSS并不能保证一定不会发生分片。当处于不同网络的主机进行通信时，数据会经过多个网络，每个网络可能会有不同的MTU。是否会发生分片取决于通信路径中最小的MTU值（路径MTU）。当路径MTU小于通信双方主机所在链路层的MTU时，依然会发生分片。解决的办法是通过IP报头中的DF标志位，当该位为1时，则告知路径中的所有网络不要将该IP包分片。如果该IP包长度大于MTU时，直接返回一个ICMP不可达差错报文，该报文中包含了下一个网络的MTU值，发送方主机根据这个值来重新确定MSS。这种机制还可以用于探测路径MTU。</p>
+<p>对于应用程序而言，只需要调用send或者write等系统调用，即认为将数据发送到对端，然而事实却并非如此。我们知道，唯一确定数据已经到达对方的方法是接收到对方的ACK，然而，send和write等系统调用，并不是等到接收对方ACK才返回的。下面看一下在内核里面到底经过了哪些过程。</p>
+<h3 id="发送缓冲区">发送缓冲区</h3><p>应用程序调用send或write等系统调用发送数据时，实际上只是把数据拷贝到内核的发送缓冲区中，以便让应用程序可以立即释放内存。拷贝的方式并非原封不动的拷贝，而是将应用层数据按照MSS大小划分成多个分片，放入该TCP连接对应的发送队列中。<br>由于内核维护的发送缓冲区长度有限（/proc/sys/net/core/wmem_default），如果在拷贝的时候发现发送缓冲区已经满了，则必须等待内核释放缓冲区（收到对方的ACK后，内核确认对方已经收到了这个TCP报文段，就没有必要继续缓存等待定时重发了）。如果套接字没有设置为非阻塞模式，那么该系统调用会一直阻塞，直到发送缓冲区中有部分空间释放出来（不一定要大于待发送数据的长度）；否则系统调用立刻返回EWOULDBLOCK或EAGAIN。</p>
+<h3 id="发送过程">发送过程</h3><p>发送过程大致可以划分为以下几步：</p>
+<ol>
+<li>应用程序调用send或write系统调用发送数据；</li>
+<li>进入内核态，send或write调用tcp_sendmsg函数；</li>
+<li>将用户态数据按照MSS分片后，放入内核中该TCP连接对应的发送缓冲区中；如果缓冲区已满则根据套接字是否阻塞来选择等待时间，等待过程代码如下：<br>net/ipv4/tcp.c中的tcp_sendmsg函数：<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line">wait_for_memory:                                                                    </span><br><span class="line">          <span class="keyword">if</span> (copied)</span><br><span class="line">              tcp_push(sk, flags &amp; ~MSG_MORE, mss_now, TCP_NAGLE_PUSH);</span><br><span class="line">          </span><br><span class="line">          <span class="keyword">if</span> ((err = sk_stream_wait_memory(sk, &amp;timeo)) != <span class="number">0</span>)                         </span><br><span class="line">              <span class="keyword">goto</span> do_error;                                                          </span><br><span class="line"></span><br><span class="line">          mss_now = tcp_send_mss(sk, &amp;size_goal, flags);</span><br><span class="line">      &#125;</span><br></pre></td></tr></table></figure>
+</li>
+</ol>
+<p>sk_stream_wait_memory函数在net/core/stream.c文件中，完成的工作就是等待缓冲区中出现空闲的内存，如果发现参数timeo参数为0，则直接返回EAGAIN。timeo参数指定超时时间，在tcp_sendmsg函数刚开始，通过调用sock_sndtimeo函数获得，该函数在include/net/sock.h文件中，实现很简单:如果设置了NONBLOCK选项便返回0，否则返回套接字设置的等待时间sk-&gt;sk_sndtimeo（默认值也是0，但是表示无限长时间）<br><figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">static</span> <span class="keyword">inline</span> <span class="keyword">long</span> <span class="title">sock_sndtimeo</span><span class="params">(<span class="keyword">const</span> <span class="keyword">struct</span> sock *sk, <span class="keyword">int</span> noblock)</span></span><br><span class="line"></span>&#123;</span><br><span class="line">    <span class="keyword">return</span> noblock ? <span class="number">0</span> : sk-&gt;sk_sndtimeo;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure></p>
+<ol>
+<li>调用tcp_push等方法，它最终会调用IP层的方法来发送tcp_write_queue队列中的报文，但是IP层方法返回，依然不代表已经发送出去。</li>
+</ol>
+<p>因此，send或write系统调用返回，并不能保证对方已经接受到该报文，甚至不能保证主机将该消息发送到网络上，唯一能够确定的是，内核会试图保证将该消息发送到对端。</p>
+<h3 id="NAGLE算法">NAGLE算法</h3><p>某些场景下，应用程序可能有如下行为：每次发送的数据量很小，发送的次数很多。如果按照默认的行为，那么每次发送的数据均作为一个TCP报文段发送到对方。假设应用程序每次只发送1个字节的数据，却需要为这1个字节加上20字节的TCP报头和20字节的IP报头，这显然是很低效的，于是有了<a href="http://en.wikipedia.org/wiki/Nagle%27s_algorithm" target="_blank" rel="external">NAGLE算法</a>来解决这个问题。<br>NAGLE算法的伪代码描述如下：<br><figure class="highlight vhdl"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">if</span> there <span class="keyword">is</span> <span class="keyword">new</span> data <span class="keyword">to</span> send</span><br><span class="line">  <span class="keyword">if</span> the window size &gt;= MSS <span class="keyword">and</span> available data <span class="keyword">is</span> &gt;= MSS</span><br><span class="line">    send complete MSS segment now</span><br><span class="line">  <span class="keyword">else</span></span><br><span class="line">    <span class="keyword">if</span> there <span class="keyword">is</span> unconfirmed data still <span class="keyword">in</span> the pipe</span><br><span class="line">      enqueue data <span class="keyword">in</span> the <span class="keyword">buffer</span> <span class="keyword">until</span> an acknowledge <span class="keyword">is</span> received</span><br><span class="line">    <span class="keyword">else</span></span><br><span class="line">      send data immediately</span><br><span class="line">    <span class="keyword">end</span> <span class="keyword">if</span></span><br><span class="line">  <span class="keyword">end</span> <span class="keyword">if</span></span><br><span class="line"><span class="keyword">end</span> <span class="keyword">if</span></span><br></pre></td></tr></table></figure></p>
+<p>简单来说，NAGLE算法的思想就是，任何时刻只能有一个已经发送出去且未被确认小报文（即长度小于MSS的报文）。通过将相邻的多个小报文合并成一个较大的报文发送出去，可以避免大量小报文带来的网络负载。然而，NAGLE算法可能导致延迟增加，对于网络状况非常好但是要求延迟较低的情况下，可以通过setsockopt关闭NAGLE算法。需要注意的是，关闭连接的4次挥手报文并不受NAGLE算法制约。<br>简单看一下NAGLE算法在内核中的实现，首先看看net/ipv4/tcp_output.c中的tcp_nagle_test函数：<br><figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">static</span> <span class="keyword">inline</span> <span class="keyword">int</span> <span class="title">tcp_nagle_test</span><span class="params">(<span class="keyword">struct</span> tcp_sock *tp, <span class="keyword">struct</span> sk_buff *skb,</span><br><span class="line">                 <span class="keyword">unsigned</span> <span class="keyword">int</span> cur_mss, <span class="keyword">int</span> nonagle)</span></span><br><span class="line"></span>&#123;</span><br><span class="line">    <span class="comment">/* Nagle rule does not apply to frames, which sit in the middle of the</span><br><span class="line">     * write_queue (they have no chances to get new data).</span><br><span class="line">     *</span><br><span class="line">     * This is implemented in the callers, where they modify the 'nonagle'</span><br><span class="line">     * argument based upon the location of SKB in the send queue.</span><br><span class="line">     */</span></span><br><span class="line">    <span class="comment">//首先判断是否设置了NONAGLE选项</span></span><br><span class="line">    <span class="keyword">if</span> (nonagle &amp; TCP_NAGLE_PUSH)</span><br><span class="line">        <span class="keyword">return</span> <span class="number">1</span>;</span><br><span class="line"></span><br><span class="line">    <span class="comment">/* Don't use the nagle rule for urgent data (or for the final FIN).</span><br><span class="line">     * Nagle can be ignored during F-RTO too (see RFC4138).</span><br><span class="line">     */</span></span><br><span class="line">    <span class="comment">//对紧急报文不使用NAGLE算法</span></span><br><span class="line">    <span class="keyword">if</span> (tcp_urg_mode(tp) || (tp-&gt;frto_counter == <span class="number">2</span>) ||</span><br><span class="line">        (TCP_SKB_CB(skb)-&gt;flags &amp; TCPCB_FLAG_FIN))</span><br><span class="line">        <span class="keyword">return</span> <span class="number">1</span>;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> (!tcp_nagle_check(tp, skb, cur_mss, nonagle))</span><br><span class="line">        <span class="keyword">return</span> <span class="number">1</span>;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">return</span> <span class="number">0</span>;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure></p>
+<p>tcp_nagle_check函数也在该源文件中：<br><figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">//该函数返回0代表允许发送，否则不通过</span></span><br><span class="line"><span class="function"><span class="keyword">static</span> <span class="keyword">inline</span> <span class="keyword">int</span> <span class="title">tcp_nagle_check</span><span class="params">(<span class="keyword">const</span> <span class="keyword">struct</span> tcp_sock *tp,</span><br><span class="line">                  <span class="keyword">const</span> <span class="keyword">struct</span> sk_buff *skb,</span><br><span class="line">                  <span class="keyword">unsigned</span> mss_now, <span class="keyword">int</span> nonagle)</span></span><br><span class="line"></span>&#123;</span><br><span class="line">    <span class="keyword">return</span> (skb-&gt;len &lt; mss_now &amp;&amp;</span><br><span class="line">        ((nonagle &amp; TCP_NAGLE_CORK) ||</span><br><span class="line">        <span class="comment">//判断是否有已发出去且未被确认的分组(packets_out）</span></span><br><span class="line">         (!nonagle &amp;&amp; tp-&gt;packets_out &amp;&amp; tcp_minshall_check(tp))));</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure></p>
+<p>再看看tcp_minshall_check函数：<br><figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">//该函数返回0表示允许发送</span></span><br><span class="line"><span class="function"><span class="keyword">static</span> <span class="keyword">inline</span> <span class="keyword">int</span> <span class="title">tcp_minshall_check</span><span class="params">(<span class="keyword">const</span> <span class="keyword">struct</span> tcp_sock *tp)</span></span><br><span class="line"></span>&#123;</span><br><span class="line">    <span class="comment">//上次发送的小报文未被确认</span></span><br><span class="line">    <span class="keyword">return</span> after(tp-&gt;snd_sml, tp-&gt;snd_una) &amp;&amp;</span><br><span class="line">    <span class="comment">//当前要发送的是未被确认的小报文之后的报文</span></span><br><span class="line">        !after(tp-&gt;snd_sml, tp-&gt;snd_nxt);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure></p>
+<p>可以看出，开启了NAGLE算法后，在上一个未被确认的小报文之后的小报文都是不允许发送的，直到上一个小报文被确认，或将多片数据合并成一个大于等于MSS的报文，才会被发送。</p>
+
+    
+  </div>
+  <footer>
+    
+      
+      
+  <div class="tags">
+    <a class="tags-link" href="/tags/TCP-IP/">TCP/IP</a>
+  </div>
+
+    
+    <div class="clearfix"></div>
+  </footer>
+</article>
+
+
+<section id="comment">
+  <h1 class="title">评论</h1>
+  <div class="ds-thread" data-title="TCP报文的发送">
+  </div>
+</section>
+</div>
+  </div>
+  <footer id="footer"><div class="copyright">
+  
+  &copy; 2015 <a href="/">Zhang Yulu</a>
+  
+</div>
+<div class="theme-copyright">
+  Theme by <a href="https://github.com/orderedlist" target="_blank">orderedlist</a>
+   | 
+  Redesign by <a href="http://heroicyang.com/" target="_blank">Heroic Yang</a>
+</div>
+<div class="clearfix"></div></footer>
+  <script src="//ajax.googleapis.com/ajax/libs/jquery/1.8/jquery.min.js"></script>
+<script src="/js/scale.fix.js"></script>
+<script src="/js/jquery.imagesloaded.min.js"></script>
+<script src="/js/gallery.js"></script>
+
+
+<script type="text/javascript">
+  var duoshuoQuery = { short_name: 'zhangyulublog' };
+  (function() {
+    var ds = document.createElement('script');
+    ds.type = 'text/javascript';
+    ds.async = true;
+    ds.src = 'http://static.duoshuo.com/embed.js';
+    ds.charset = 'UTF-8';
+    (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(ds);
+  })();
+</script>
+
+
+
+<link rel="stylesheet" href="/fancybox/jquery.fancybox.css" media="screen" type="text/css">
+<script src="/fancybox/jquery.fancybox.pack.js"></script>
+<script type="text/javascript">
+  (function($){
+    $('.fancybox').fancybox();
+  })(jQuery);
+</script>
+
+</body>
+</html>

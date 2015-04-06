@@ -1,0 +1,203 @@
+<!DOCTYPE HTML>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="chrome=1">
+  
+  <title>浅谈TCP的backlog | ZhangYulu&#39;s Blog</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  
+    <meta name="author" content="Zhang Yulu">
+  
+  
+    <meta name="description" content="在Linux/Unix下，应用程序调用listen系统调用进行监听时，需要指定一个int类型的backlog参数。man手册中的描述为:
+
+The backlog argument defines the maximum length to which the queue of pending connections for sockfd may grow
+
+通常可以理解为待建立的连接数上限。
+首">
+  
+  <meta name="description" content="在Linux/Unix下，应用程序调用listen系统调用进行监听时，需要指定一个int类型的backlog参数。man手册中的描述为:
+
+The backlog argument defines the maximum length to which the queue of pending connections for sockfd may grow
+
+通常可以理解为待建立的连接数上限。
+首">
+<meta property="og:type" content="article">
+<meta property="og:title" content="浅谈TCP的backlog">
+<meta property="og:url" content="http://yoursite.com/2015/03/13/backlog-of-tcp-in-linux/index.html">
+<meta property="og:site_name" content="ZhangYulu's Blog">
+<meta property="og:description" content="在Linux/Unix下，应用程序调用listen系统调用进行监听时，需要指定一个int类型的backlog参数。man手册中的描述为:
+
+The backlog argument defines the maximum length to which the queue of pending connections for sockfd may grow
+
+通常可以理解为待建立的连接数上限。
+首">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="浅谈TCP的backlog">
+<meta name="twitter:description" content="在Linux/Unix下，应用程序调用listen系统调用进行监听时，需要指定一个int类型的backlog参数。man手册中的描述为:
+
+The backlog argument defines the maximum length to which the queue of pending connections for sockfd may grow
+
+通常可以理解为待建立的连接数上限。
+首">
+  
+    <link rel="alternate" href="/atom.xml" title="ZhangYulu&#39;s Blog" type="application/atom+xml">
+  
+  
+  <link rel="stylesheet" href="/css/style.css" type="text/css">
+  <!--[if lt IE 9]><script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script><![endif]-->
+  
+</head>
+
+<body>
+  <div class="wrapper">
+    <header id="header">
+  <div class="title">
+    <h1><a href="/">ZhangYulu&#39;s Blog</a></h1>
+    <p><a href="/"></a></p>
+  </div>
+  <nav class="nav">
+    <ul>
+      
+        <li><a href="/">首页</a></li>
+      
+        <li><a href="/archives">文章归档</a></li>
+      
+        <li><a href="/links">友情链接</a></li>
+      
+      
+        <li><a href="/atom.xml">RSS</a></li>
+      
+    </ul>
+    <div class="clearfix"></div>
+  </nav>
+  <div class="clearfix"></div>
+</header>
+    <div class="content"><article class="post">
+  <header>
+    
+      <div class="icon"></div>
+      <a href="/2015/03/13/backlog-of-tcp-in-linux/">
+  <time datetime="2015-03-13T14:13:19.000Z">
+    3月 13 2015
+  </time>
+</a>
+    
+    
+  
+    <h1 class="title">浅谈TCP的backlog</h1>
+  
+
+  </header>
+  
+  <div class="entry">
+    
+      <p>在Linux/Unix下，应用程序调用<code>listen</code>系统调用进行监听时，需要指定一个int类型的backlog参数。<a href="http://linux.die.net/man/2/listen" target="_blank" rel="external">man手册</a>中的描述为:</p>
+<blockquote>
+<p>The backlog argument defines the maximum length to which the queue of pending connections for sockfd may grow</p>
+</blockquote>
+<p>通常可以理解为待建立的连接数上限。</p>
+<p>首先来回顾一下TCP建立连接过程的三次握手</p>
+<ol>
+<li>客户端调用connect，向服务器发送SYN报文，服务器收到后将该连接状态记录为<code>SYN Reveived</code>；</li>
+<li>服务器向客户端回复SYN/ACK报文；</li>
+<li>服务器收到客户端发送过来的ACK报文，该连接成功建立，状态为<code>ESTABLISHED</code>，等待应用程序调用accept。</li>
+</ol>
+<p>因此，服务器需要使用某种方式在保存当前所有待建立和已建立的连接信息，这就是真正意义上的backlog。</p>
+<a id="more"></a>
+<p>在Linux的TCP/IP协议栈实现中，backlog都是由2个队列来实现的:</p>
+<ol>
+<li><code>SYN队列</code>:服务器收到SYN报文后，将该连接放入SYN队列中，并回复SYN/ACK；</li>
+<li><code>ACCEPT队列</code>：服务器收到三次握手中的最后一个ACK后，将该连接从SYN队列移至ACCEPT队列，accept系统调用所做的只是从该队列中取出连接并创建套接字。</li>
+</ol>
+<p>从<a href="http://linux.die.net/man/2/listen" target="_blank" rel="external">man手册</a>中可以看出，在listen系统调用中，backlog参数指定的其实是ACCEPT队列的长度，而SYN队列的长度是作为一个系统参数，保存在/proc/sys/net/ipv4/tcp_max_syn_backlog文件中。</p>
+<p>考虑一下在什么情况下会导致队列变满:</p>
+<ul>
+<li>当应用程序调用accept的速率比连接建立完成的速率慢（如系统负载过高，或应用程序等待获取锁），会导致ACCEPT队列中元素增加，直至变满；</li>
+<li>当完成连接建立的速率比接收新的连接请求（即SYN报文）的速率慢（如网络延迟较高的情况下有大量连接请求），会导致SYN队列变满。</li>
+</ul>
+<hr>
+<p><strong><strong>ACCEPT队列满</strong></strong><br>首先考虑如下情况：</p>
+<blockquote>
+<p>服务器的ACCEPT队列已满之后，收到了SYN队列中某个客户端发来的ACK，即完成了三次握手</p>
+</blockquote>
+<p>收到ACK报文后的处理在内核net/ipv4/tcp_minisocks.c文件的tcp_check_req函数中，代码片段如下：</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br></pre></td><td class="code"><pre><span class="line">	<span class="comment">/* OK, ACK is valid, create big socket and</span><br><span class="line">	 * feed this segment to it. It will repeat all</span><br><span class="line">	 * the tests. THIS SEGMENT MUST MOVE SOCKET TO</span><br><span class="line">	 * ESTABLISHED STATE. If it will be dropped after</span><br><span class="line">	 * socket is created, wait for troubles.</span><br><span class="line">	 */</span></span><br><span class="line">	child = inet_csk(sk)-&gt;icsk_af_ops-&gt;syn_recv_sock(sk, skb, req, NULL);</span><br><span class="line">	<span class="keyword">if</span> (child == NULL)</span><br><span class="line">		<span class="keyword">goto</span> listen_overflow;</span><br><span class="line"></span><br><span class="line">	inet_csk_reqsk_queue_unlink(sk, req, prev);</span><br><span class="line">	inet_csk_reqsk_queue_removed(sk, req);</span><br><span class="line"></span><br><span class="line">	inet_csk_reqsk_queue_add(sk, req, child);</span><br><span class="line">	<span class="keyword">return</span> child;</span><br><span class="line"></span><br><span class="line">listen_overflow:</span><br><span class="line">	<span class="keyword">if</span> (!sysctl_tcp_abort_on_overflow) &#123;</span><br><span class="line">		inet_rsk(req)-&gt;acked = <span class="number">1</span>;</span><br><span class="line">		<span class="keyword">return</span> NULL;</span><br><span class="line">	&#125;</span><br><span class="line"></span><br><span class="line">embryonic_reset:</span><br><span class="line">	NET_INC_STATS_BH(sock_net(sk), LINUX_MIB_EMBRYONICRSTS);</span><br><span class="line">	<span class="keyword">if</span> (!(flg &amp; TCP_FLAG_RST))</span><br><span class="line">		req-&gt;rsk_ops-&gt;send_reset(sk, skb);</span><br><span class="line"></span><br><span class="line">	inet_csk_reqsk_queue_drop(sk, req, prev);</span><br><span class="line">	<span class="keyword">return</span> NULL;</span><br></pre></td></tr></table></figure>
+<p>syn_recv_sock函数在相同目录的tcp_ipv4.c文件中，该函数指针指向的是tcp_v4_syn_recv_sock函数，可以看到下面两条语句：<br><figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">if</span> (sk_acceptq_is_full(sk))</span><br><span class="line">	<span class="keyword">goto</span> exit_overflow;</span><br></pre></td></tr></table></figure></p>
+<p>exit_overflow代码如下：<br><figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">exit_overflow:</span><br><span class="line">	NET_INC_STATS_BH(sock_net(sk), LINUX_MIB_LISTENOVERFLOWS);</span><br><span class="line"><span class="built_in">exit</span>:</span><br><span class="line">	NET_INC_STATS_BH(sock_net(sk), LINUX_MIB_LISTENDROPS);</span><br><span class="line">	dst_release(dst);</span><br><span class="line">	<span class="keyword">return</span> NULL;</span><br></pre></td></tr></table></figure></p>
+<p>在内核检查到ACCEPT队列满了之后，直接执行exit_overflow标签之后的代码，虽然中间的代码我不太明白是什么意思，但是可以看到最后直接返回NULL。</p>
+<p>再回到最开始的tcp_check_req函数中，由于child变量，即syn_recv_sock函数返回的是NULL，直接跳转到listen_overflow之后的代码执行，当/proc/sys/net/ipv4/tcp_abort_on_overflow为0时，该函数只将acked标志位置为1，其他任何事情都不做，直接返回，该ACK报文相当于被丢弃；否则，如果设置了tcp_abort_on_overflow选项，则向客户端发送RST报文。</p>
+<p>随后，服务器发现，发出SYN/ACK之后迟迟未收到客户端的ACK（其实已经收到了，但是被自己给扔了！），根据TCP的超时重传机制，服务器再次向客户端发送SYN/ACK，客户端因此重新发送ACK。在多次重发之后(重试次数由/proc/sys/net/ipv4/tcp_synack_retries指定），如果还是未能将该连接放入ACCEPT队列，则最终服务器依然会发送RST报文，告知客户端连接失败。</p>
+<p>这个时候会有一个比较有意思的状态。客户端在接收到服务器发来的SYN/ACK时，就认为这个连接建立完成，随后可以在这个套接字上进行读写操作，发送过去的数据依然会被服务器忽略，然后继续重传；在服务器端，要么没有收到ACK，要么收到了ACK但是ACCEPT队列满导致无法放入，因此对于服务器来说，该连接处于SYN RECEIVED状态。当然，最终结果只有两种，服务器始终未在ACCEPT队列腾出空间，超出了/proc/sys/net/ipv4/tcp_synack_retries所指定的重试次数后发送RST，或腾出空间完成连接建立，接收数据。</p>
+<hr>
+<p>上面讨论的是服务器发送SYN/ACK之后的情况，事实上，当ACCEPT队列满了且SYN队列没满时，并非所有SYN请求都能够收到服务器的SYN/ACK。此时，内核会限制新来的连接请求，有一定概率丢弃客户端发送过来的SYN报文，以此来限制SYN队列的增长速度，防止SYN队列过快增长变满而导致客户端无法与服务器建立新的连接。由于客户端调用connect默认会重试3次，如果3次均没有得到服务器回复的SYN/ACK，则连接失败。</p>
+<hr>
+<p><strong><strong>SYN队列满</strong></strong><br>当SYN队列变满的情况较为简单。新的SYN请求将被直接丢弃。 由于TCP的超时重发机制，客户端会多次尝试SYN请求，直至超时（connect默认的超时时间是75s）。</p>
+<hr>
+<p><strong><strong>SYN flood</strong></strong><br>经过上面的讨论，有人可能就会想到，如果有人恶意发起大量SYN请求，收到服务器发送回来的SYN/ACK之后就不管了，那就会导致服务器的SYN队列迅速被占满，从而无法响应其他正常的连接请求了。是的，这就是所谓的<a href="http://en.wikipedia.org/wiki/SYN_flood" target="_blank" rel="external">SYN flood</a>。SYN flood是一种较为常见的DDOS攻击手段，而且目前还没有什么特别好的办法对付。服务器端可以更改系统参数，把SYN队列的容量调高，但是会占用更多的资源，但是对于规模较大的攻击也几乎无效。在SYN flood的WiKi中提到了一种叫<a href="http://en.wikipedia.org/wiki/SYN_cookies" target="_blank" rel="external">SYN cookies</a>的应对方法，下次有空再深入研究一下。</p>
+
+    
+  </div>
+  <footer>
+    
+      
+      
+  <div class="tags">
+    <a class="tags-link" href="/tags/TCP-IP/">TCP/IP</a>
+  </div>
+
+    
+    <div class="clearfix"></div>
+  </footer>
+</article>
+
+
+<section id="comment">
+  <h1 class="title">评论</h1>
+  <div class="ds-thread" data-title="浅谈TCP的backlog">
+  </div>
+</section>
+</div>
+  </div>
+  <footer id="footer"><div class="copyright">
+  
+  &copy; 2015 <a href="/">Zhang Yulu</a>
+  
+</div>
+<div class="theme-copyright">
+  Theme by <a href="https://github.com/orderedlist" target="_blank">orderedlist</a>
+   | 
+  Redesign by <a href="http://heroicyang.com/" target="_blank">Heroic Yang</a>
+</div>
+<div class="clearfix"></div></footer>
+  <script src="//ajax.googleapis.com/ajax/libs/jquery/1.8/jquery.min.js"></script>
+<script src="/js/scale.fix.js"></script>
+<script src="/js/jquery.imagesloaded.min.js"></script>
+<script src="/js/gallery.js"></script>
+
+
+<script type="text/javascript">
+  var duoshuoQuery = { short_name: 'zhangyulublog' };
+  (function() {
+    var ds = document.createElement('script');
+    ds.type = 'text/javascript';
+    ds.async = true;
+    ds.src = 'http://static.duoshuo.com/embed.js';
+    ds.charset = 'UTF-8';
+    (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(ds);
+  })();
+</script>
+
+
+
+<link rel="stylesheet" href="/fancybox/jquery.fancybox.css" media="screen" type="text/css">
+<script src="/fancybox/jquery.fancybox.pack.js"></script>
+<script type="text/javascript">
+  (function($){
+    $('.fancybox').fancybox();
+  })(jQuery);
+</script>
+
+</body>
+</html>

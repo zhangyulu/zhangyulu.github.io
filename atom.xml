@@ -1,0 +1,198 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title><![CDATA[ZhangYulu's Blog]]></title>
+  
+  <link href="/atom.xml" rel="self"/>
+  <link href="http://yoursite.com/"/>
+  <updated>2015-04-06T13:25:02.198Z</updated>
+  <id>http://yoursite.com/</id>
+  
+  <author>
+    <name><![CDATA[Zhang Yulu]]></name>
+    <email><![CDATA[zhangyulu@outlook.com]]></email>
+  </author>
+  
+  <generator uri="http://hexo.io/">Hexo</generator>
+  
+  <entry>
+    <title><![CDATA[TCP中的几种超时和定时器]]></title>
+    <link href="http://yoursite.com/2015/04/06/timer-and-timeout-in-tcp/"/>
+    <id>http://yoursite.com/2015/04/06/timer-and-timeout-in-tcp/</id>
+    <published>2015-04-06T13:21:51.000Z</published>
+    <updated>2015-04-06T13:25:02.198Z</updated>
+    <content type="html"><![CDATA[<p>最近重新翻阅了一下Stevens的《TCP/IP详解》，发现不少知识点之前没有理解透彻，或者过了太久已经没有印象了，因此决定花一些时间来整理和记录下来。</p>
+<h3 id="超时重传">超时重传</h3><p>在TCP中重传可能发生在2种情况下：<a href="http://en.wikipedia.org/wiki/Fast_retransmit" target="_blank" rel="external">快速重传</a>和超时重传。超时重传指的是，当发送到对方的报文段在一定超时时间之内，仍没有收到对方的Ack，则重新发送该报文段。<br>那么问题来了，超时时间是怎么决定的？如果超时时间太长，报文丢失之后很久才重发，效率和吞吐率太低；时间太短，可能某些报文只是延迟到达，并没有丢失，重传又会增加网络负载，可能造成网络拥塞。因此，在不同的网络环境下，甚至在相同网络的不同时间段下，均需要动态地计算超时时间。<br>通过<code>RTT（Round Trip Time）</code>可以大致决定，在多长时间之内没有收到Ack，则认为该报文丢失，并重传该报文。然而，网络环境随时在变化，我们没有办法准确的确定一个报文的RTT，只能通过多次采样来估算。</p>
+<h4 id="RTT的测量和估算">RTT的测量和估算</h4><p>为了尽量准确地估算下一次报文的RTT，TCP需要对已经发送出去报文的RTT进行采样。对于每个连接，在发送数据时，保证全局有一个定时器正在运行（如果发送数据时已经有定时器在运行，则不对该报文进行计时）。</p>
+<a id="more"></a>
+<h5 id="原始算法">原始算法</h5><p>最初的TCP规范[<a href="http://www.ietf.org/rfc/rfc0793.txt" target="_blank" rel="external">RFC0793</a>]使用如下公式估算RTT：</p>
+<blockquote>
+<p>SRTT = α(SRTT) + (1 − α) M</p>
+</blockquote>
+<p><code>SRTT(Smoothed RTT estimator)</code>指平滑后的RTT估算值，α为平滑因子，推荐值为0.9，M为实际测量的RTT值。该算法预测的RTT值90%来自于前一个RTT，10%来自新的测量值。重传超时<code>RTO(Retransmission Timeout)</code>的值设置为</p>
+<blockquote>
+<p> RTO = min(ubound, max(lbound, β* SRTT))</p>
+</blockquote>
+<p>ubound和lbound分别RTO的上限和下限，β的推荐值为2。</p>
+<h5 id="Jacobson/Karels算法">Jacobson/Karels算法</h5><p>上述算法的缺点在于，在网络环境突然发生较大变化时，该算法无法跟上这种变化，及时进行相应的调整，因为估算的RTO值只有10%来自于新的测量值。例如，某个中间路由器发生故障导致吞吐率降低，该算法还是会在相对短的时间内重传，继续增加网络负载，是一种雪上加霜的行为。<br>因此，有人提出一种新的算法，除了计算平滑的RTT值之外，还要计算RTT的变化幅度，RTO根据这两个值来进行确定。这就是Jacobson/Karels算法[<a href="http://tools.ietf.org/html/rfc6298" target="_blank" rel="external">RFC6298</a>]，该算法具体如下：</p>
+<blockquote>
+<p>SRTT = (1 - g)(SRTT) + (g)M<br>RTTval = (1 - h)(RTTval) + (h)( | M - SRTT | )<br>RTO = SRTT+ 4(RTTval)<br>其中g的推荐值为0.125，h的推荐值为0.25</p>
+</blockquote>
+<p>SRTT的计算方法不变，但是该算法还需要计算RTT的加权移动平均值RTTval，该值是被平滑后的RTT测量值与SRTT之差（取绝对值），类似于方差但是计算方法更简单，用于表示RTT的变化幅度。该算法能够更快地跟上网络环境的变化，并做出相应的调整。<br>那如果SYN报文超时怎么办？此时还没有能够对RTT进行采样，无法根据上述算法计算得出。因此，RFC6298指出，RTO初始值设置为1s。如果第一个SYN报文超时，以该RTO值进行指数退避的同时，将数据传输阶段的RTO初始值设置为3s。<br>取得第一个RTT采样值M后，对算法进行如下初始化：</p>
+<blockquote>
+<p>SRTT = M<br>RTTval = M / 2</p>
+</blockquote>
+<p>此后，便根据该值和后续RTT采样值来进行后续的计算。</p>
+<h5 id="重传二义性和Karn算法">重传二义性和Karn算法</h5><p>这样做有一个问题，如下图所示，可能会有两种情况，而我们无法判断到底是哪一种：<br><img src="http://7xifpb.com1.z0.glb.clouddn.com/tcp_rtt_estimate.svg" alt="tcp_rtt_estimate.svg"></p>
+<ul>
+<li>第一次发送的报文丢失，超时重传后，收到对方的Ack</li>
+<li>由于网络原因，第一次发送的报文延迟到达，接收方对延迟到达的Ack进行确认，随后收到重传的报文并丢弃</li>
+</ul>
+<p>因此，Karn算法指出，一旦发生重传，则不对该报文的RTT进行采样。但是如果网络突然出现故障，导致所有报文的实际RTT大于当前的RTO，则每个报文都会发生重传，同时，又因为不能对重传的报文进行RTT采样，因此也无法更新RTO，这就陷入了僵局，而对每个报文都重传毫无疑问会很大程度上给网络增加没必要的负载，使得网络情况更差。为了避免这种情况，Karn算法的第二点，就是在发生超时重传的情况下，对RTO进行<code>指数退避(exponential backoff)</code>，每次进行重传就将当前RTO翻倍，直到下一次没有重传就收到对方的Ack，才根据测量的RTT和SRTT重新计算RTO。这样做的目的在于，消除重传二义性的同时，根据网络环境的变化及时调整RTO，防止进一步使网络过载。发生重传后，在将RTO进行指数退避的同时，触发<code>拥塞避免算法</code>，将thresh值置为当前拥塞窗口的一半，再将拥塞窗口置为1，重新进行慢启动。</p>
+<h5 id="超时重传次数">超时重传次数</h5><p>上面讨论了重传的超时时间，但是如果网络出现故障，或者对端主机崩溃，使得报文始终无法发送到对端，当然不可能无限地重传下去，因此，需由系统指定重传次数上限。在Linux下，这个上限是可以配置的，由/proc/sys/net/ipv4目录下的tcp_retries1, tcp_retries2和tcp_syn_retries三个文件指定。</p>
+<ul>
+<li>tcp_retries1: 重传该文件指定次数之后，则要求网络层更新路由表。默认值为3</li>
+<li>tcp_retries2: 重传该文件指定次数之后，放弃传输，即最大重传次数。默认值为15</li>
+<li>tcp_syn_retries: 指定syn报文的重传次数。默认值为5（但是在Ubuntu 14.04下查看该值默认为6）</li>
+</ul>
+<h3 id="坚持定时器">坚持定时器</h3><p>说完了超时重传的定时器，我们来看一下TCP的<code>坚持定时器(persist timer)</code>。</p>
+<p>我们知道，由于TCP的滑动窗口协议，如果接收方向发送方通告的窗口大小为0（例如当接收方应用程序来不及读取接受缓冲区中的数据，导致接受缓冲区占满），那么发送方就不能继续发送数据。当接收方应用程序读取一部分数据，使得滑动窗口不为0时，接收方会向发送方发送一个Ack，这个Ack不确认任何数据，只是告诉新的窗口大小，因此也被称为<code>窗口更新</code>。<br>但是，这个Ack报文段中不带任何数据，所以不会有任何超时重传的机制来保证该Ack可靠送达。如果这个Ack丢失了，双方岂不是都陷入了无限的等待？发送方等待接收方的窗口更新，接收方等待发送方的数据。<br>为了避免这个问题，TCP引入了坚持定时器。当发送方在一定时间内没有收到接收方的窗口更新，坚持定时器超时后，会主动向接收方询问当前窗口，这个过程也叫<code>窗口探测(Window Probes)</code>，窗口探测其实就是一个包含0字节或1字节数据的报文段。《TCP/IP详解》中写的是1字节，但是在Ubuntu 14.04下实测为0字节，可能是不同的实现方法。接收方收到这个报文后，会向发送方回复Ack，其中包含当前的窗口大小。这个Ack可能会确认该1字节的数据（如果探测报文包含数据的话），也可能不会，这取决与接收方当前的接收缓冲区占用情况。<br>坚持定时器的首次超时时间为当前RTO，随后进行指数退避（超时时间存在最大上限，在Ubuntu 14.04下，超时时间最大值为120s），直到接收方通告的窗口大小不为0。<br>抓包结果如下：<br><img src="http://7xifpb.com1.z0.glb.clouddn.com/screenshot_persist_timer.png" alt="packet capture"></p>
+<p>可以看到，在最开始，超时时间以指数退避的方式进行增加，直到该值达到120s之后保持不变。《TCP/IP详解》中说：</p>
+<blockquote>
+<p>An important difference, however, is that a normal TCP never gives up sending window probes, whereas it may eventually give up trying to perform retransmissions</p>
+</blockquote>
+<p>发送方不会放弃窗口探测，但是从截图中可以看出，在接收方收到一定次数的窗口探测，而应用程序始终没有读取数据时，会向发送方发送RST报文重置连接。</p>
+<h3 id="保活定时器">保活定时器</h3><p>如果连接处于空闲状态，较长时间内没有进行数据交互，如果连接双方任意一方崩溃或发生故障（如掉电或网线拔出等情况，来不及向对端发送FIN或RST），对方是无法感知到的。如果对方确实已经发生故障，则应该关闭该连接，并回收相应的资源，对于并发连接数较大的服务器程序来说，这一点很重要。TCP使用<a href="http://en.wikipedia.org/wiki/Keepalive#TCP_keepalive" target="_blank" rel="external">保活定时器(Keep Alive Timer)</a>来做到这一点。<br>在默认情况下，TCP的保活定时器超时时间为2小时（在Linux下由/proc/sys/net/ipv4/tcp_keepalive_time文件指定），但是每次接收到来自对端发送过来报文，都会将该定时器复位。保活定时器的探测报文是不带任何数据，其中SYN字段比下一个发送的序列号小1。例如，如果本端下一次要发送的序列号为10（即对端上一次回复的Ack是10），那么这个探测报文的Ack是9。正是由于这个不正确的Ack，使得对端对该报文进行响应（该响应中Ack字段为10），表明它期望接收的是10而不是9。<br>保活探测报文也有超时时间和重传次数的，Linux下分别由/proc/sys/net/ipv4/tcp_keepalive_intvl和/proc/sys/net/ipv4/tcp_keepalive_probes指定，默认值分别为75s和9次。如果对方始终没有对该探测报文进行响应，就向对端发送RST报文，同时将该连接重置。</p>
+]]></content>
+    <summary type="html">
+    <![CDATA[<p>最近重新翻阅了一下Stevens的《TCP/IP详解》，发现不少知识点之前没有理解透彻，或者过了太久已经没有印象了，因此决定花一些时间来整理和记录下来。</p>
+<h3 id="超时重传">超时重传</h3><p>在TCP中重传可能发生在2种情况下：<a href="http://en.wikipedia.org/wiki/Fast_retransmit">快速重传</a>和超时重传。超时重传指的是，当发送到对方的报文段在一定超时时间之内，仍没有收到对方的Ack，则重新发送该报文段。<br>那么问题来了，超时时间是怎么决定的？如果超时时间太长，报文丢失之后很久才重发，效率和吞吐率太低；时间太短，可能某些报文只是延迟到达，并没有丢失，重传又会增加网络负载，可能造成网络拥塞。因此，在不同的网络环境下，甚至在相同网络的不同时间段下，均需要动态地计算超时时间。<br>通过<code>RTT（Round Trip Time）</code>可以大致决定，在多长时间之内没有收到Ack，则认为该报文丢失，并重传该报文。然而，网络环境随时在变化，我们没有办法准确的确定一个报文的RTT，只能通过多次采样来估算。</p>
+<h4 id="RTT的测量和估算">RTT的测量和估算</h4><p>为了尽量准确地估算下一次报文的RTT，TCP需要对已经发送出去报文的RTT进行采样。对于每个连接，在发送数据时，保证全局有一个定时器正在运行（如果发送数据时已经有定时器在运行，则不对该报文进行计时）。</p>]]>
+    
+    </summary>
+    
+      <category term="TCP/IP" scheme="http://yoursite.com/tags/TCP-IP/"/>
+    
+  </entry>
+  
+  <entry>
+    <title><![CDATA[TCP报文的发送]]></title>
+    <link href="http://yoursite.com/2015/03/19/sending-and-receiving-in-tcp/"/>
+    <id>http://yoursite.com/2015/03/19/sending-and-receiving-in-tcp/</id>
+    <published>2015-03-19T02:18:32.000Z</published>
+    <updated>2015-03-19T12:13:34.461Z</updated>
+    <content type="html"><![CDATA[<p>在TCP/IP网络协议栈中，数据的可靠传输、流量控制和拥塞控制均由传输层的TCP协议来负责。对上层应用层来说，TCP提供的是流式数据传输，而实际的传输细节却对上层透明。我们看看TCP收发消息到底经过了哪些过程。</p>
+<p>首先了解量两个概念：MTU和MSS。</p>
+<blockquote>
+<p>最大传输单元(Maximum Transmission Unit，MTU)是链路层的一个参数，是指一种通信协议的某一层上面所能通过的最大数据包大小（以字节为单位）。</p>
+</blockquote>
+<p>无论哪种数据链路，对该链路上网络分组的大小都会有限制，即MTU的值，例如最常见的以太网MTU为1500字节。当TCP层试图在以太网上发送报文段，调用IP层的方法时，会自动获取当前链路层的MTU，如果发现数据包长度大于MTU，则必须将数据包分片以达到要求，每个分片具有独立的IP报头，即可认为是独立的IP数据包。接收方根据IP报头，将所有IP数据包组成为一个TCP报文段。<br>如果一个TCP报文段的数据被分片成多个IP数据包，任何一个IP数据包丢失，则认为整个TCP报文段丢失，需要重新传输。这样做是很低效的，因此，传输层使用了另外一个参数MSS，尽量减少这种分片的产生。</p>
+<a id="more"></a>
+<blockquote>
+<p>最大分段大小（Maximum Segment Size，MSS）是传输控制协议的一个参数，以字节数定义一个计算机或通信设备所能接受的分段的最大数据量。它并不会计算TCP或IP协议头的大小。</p>
+</blockquote>
+<p>在以太网中，MTU为1500，减去TCP和IP的报头各20字节，则当前的MSS大小为1460字节。MSS是在TCP的三次握手中协商决定的，SYN报文中包含自身当前的MSS。然而，这个MSS并不能保证一定不会发生分片。当处于不同网络的主机进行通信时，数据会经过多个网络，每个网络可能会有不同的MTU。是否会发生分片取决于通信路径中最小的MTU值（路径MTU）。当路径MTU小于通信双方主机所在链路层的MTU时，依然会发生分片。解决的办法是通过IP报头中的DF标志位，当该位为1时，则告知路径中的所有网络不要将该IP包分片。如果该IP包长度大于MTU时，直接返回一个ICMP不可达差错报文，该报文中包含了下一个网络的MTU值，发送方主机根据这个值来重新确定MSS。这种机制还可以用于探测路径MTU。</p>
+<p>对于应用程序而言，只需要调用send或者write等系统调用，即认为将数据发送到对端，然而事实却并非如此。我们知道，唯一确定数据已经到达对方的方法是接收到对方的ACK，然而，send和write等系统调用，并不是等到接收对方ACK才返回的。下面看一下在内核里面到底经过了哪些过程。</p>
+<h3 id="发送缓冲区">发送缓冲区</h3><p>应用程序调用send或write等系统调用发送数据时，实际上只是把数据拷贝到内核的发送缓冲区中，以便让应用程序可以立即释放内存。拷贝的方式并非原封不动的拷贝，而是将应用层数据按照MSS大小划分成多个分片，放入该TCP连接对应的发送队列中。<br>由于内核维护的发送缓冲区长度有限（/proc/sys/net/core/wmem_default），如果在拷贝的时候发现发送缓冲区已经满了，则必须等待内核释放缓冲区（收到对方的ACK后，内核确认对方已经收到了这个TCP报文段，就没有必要继续缓存等待定时重发了）。如果套接字没有设置为非阻塞模式，那么该系统调用会一直阻塞，直到发送缓冲区中有部分空间释放出来（不一定要大于待发送数据的长度）；否则系统调用立刻返回EWOULDBLOCK或EAGAIN。</p>
+<h3 id="发送过程">发送过程</h3><p>发送过程大致可以划分为以下几步：</p>
+<ol>
+<li>应用程序调用send或write系统调用发送数据；</li>
+<li>进入内核态，send或write调用tcp_sendmsg函数；</li>
+<li>将用户态数据按照MSS分片后，放入内核中该TCP连接对应的发送缓冲区中；如果缓冲区已满则根据套接字是否阻塞来选择等待时间，等待过程代码如下：<br>net/ipv4/tcp.c中的tcp_sendmsg函数：<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line">wait_for_memory:                                                                    </span><br><span class="line">          <span class="keyword">if</span> (copied)</span><br><span class="line">              tcp_push(sk, flags &amp; ~MSG_MORE, mss_now, TCP_NAGLE_PUSH);</span><br><span class="line">          </span><br><span class="line">          <span class="keyword">if</span> ((err = sk_stream_wait_memory(sk, &amp;timeo)) != <span class="number">0</span>)                         </span><br><span class="line">              <span class="keyword">goto</span> do_error;                                                          </span><br><span class="line"></span><br><span class="line">          mss_now = tcp_send_mss(sk, &amp;size_goal, flags);</span><br><span class="line">      &#125;</span><br></pre></td></tr></table></figure>
+</li>
+</ol>
+<p>sk_stream_wait_memory函数在net/core/stream.c文件中，完成的工作就是等待缓冲区中出现空闲的内存，如果发现参数timeo参数为0，则直接返回EAGAIN。timeo参数指定超时时间，在tcp_sendmsg函数刚开始，通过调用sock_sndtimeo函数获得，该函数在include/net/sock.h文件中，实现很简单:如果设置了NONBLOCK选项便返回0，否则返回套接字设置的等待时间sk-&gt;sk_sndtimeo（默认值也是0，但是表示无限长时间）<br><figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">static</span> <span class="keyword">inline</span> <span class="keyword">long</span> <span class="title">sock_sndtimeo</span><span class="params">(<span class="keyword">const</span> <span class="keyword">struct</span> sock *sk, <span class="keyword">int</span> noblock)</span></span><br><span class="line"></span>&#123;</span><br><span class="line">    <span class="keyword">return</span> noblock ? <span class="number">0</span> : sk-&gt;sk_sndtimeo;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure></p>
+<ol>
+<li>调用tcp_push等方法，它最终会调用IP层的方法来发送tcp_write_queue队列中的报文，但是IP层方法返回，依然不代表已经发送出去。</li>
+</ol>
+<p>因此，send或write系统调用返回，并不能保证对方已经接受到该报文，甚至不能保证主机将该消息发送到网络上，唯一能够确定的是，内核会试图保证将该消息发送到对端。</p>
+<h3 id="NAGLE算法">NAGLE算法</h3><p>某些场景下，应用程序可能有如下行为：每次发送的数据量很小，发送的次数很多。如果按照默认的行为，那么每次发送的数据均作为一个TCP报文段发送到对方。假设应用程序每次只发送1个字节的数据，却需要为这1个字节加上20字节的TCP报头和20字节的IP报头，这显然是很低效的，于是有了<a href="http://en.wikipedia.org/wiki/Nagle%27s_algorithm" target="_blank" rel="external">NAGLE算法</a>来解决这个问题。<br>NAGLE算法的伪代码描述如下：<br><figure class="highlight vhdl"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">if</span> there <span class="keyword">is</span> <span class="keyword">new</span> data <span class="keyword">to</span> send</span><br><span class="line">  <span class="keyword">if</span> the window size &gt;= MSS <span class="keyword">and</span> available data <span class="keyword">is</span> &gt;= MSS</span><br><span class="line">    send complete MSS segment now</span><br><span class="line">  <span class="keyword">else</span></span><br><span class="line">    <span class="keyword">if</span> there <span class="keyword">is</span> unconfirmed data still <span class="keyword">in</span> the pipe</span><br><span class="line">      enqueue data <span class="keyword">in</span> the <span class="keyword">buffer</span> <span class="keyword">until</span> an acknowledge <span class="keyword">is</span> received</span><br><span class="line">    <span class="keyword">else</span></span><br><span class="line">      send data immediately</span><br><span class="line">    <span class="keyword">end</span> <span class="keyword">if</span></span><br><span class="line">  <span class="keyword">end</span> <span class="keyword">if</span></span><br><span class="line"><span class="keyword">end</span> <span class="keyword">if</span></span><br></pre></td></tr></table></figure></p>
+<p>简单来说，NAGLE算法的思想就是，任何时刻只能有一个已经发送出去且未被确认小报文（即长度小于MSS的报文）。通过将相邻的多个小报文合并成一个较大的报文发送出去，可以避免大量小报文带来的网络负载。然而，NAGLE算法可能导致延迟增加，对于网络状况非常好但是要求延迟较低的情况下，可以通过setsockopt关闭NAGLE算法。需要注意的是，关闭连接的4次挥手报文并不受NAGLE算法制约。<br>简单看一下NAGLE算法在内核中的实现，首先看看net/ipv4/tcp_output.c中的tcp_nagle_test函数：<br><figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">static</span> <span class="keyword">inline</span> <span class="keyword">int</span> <span class="title">tcp_nagle_test</span><span class="params">(<span class="keyword">struct</span> tcp_sock *tp, <span class="keyword">struct</span> sk_buff *skb,</span><br><span class="line">                 <span class="keyword">unsigned</span> <span class="keyword">int</span> cur_mss, <span class="keyword">int</span> nonagle)</span></span><br><span class="line"></span>&#123;</span><br><span class="line">    <span class="comment">/* Nagle rule does not apply to frames, which sit in the middle of the</span><br><span class="line">     * write_queue (they have no chances to get new data).</span><br><span class="line">     *</span><br><span class="line">     * This is implemented in the callers, where they modify the 'nonagle'</span><br><span class="line">     * argument based upon the location of SKB in the send queue.</span><br><span class="line">     */</span></span><br><span class="line">    <span class="comment">//首先判断是否设置了NONAGLE选项</span></span><br><span class="line">    <span class="keyword">if</span> (nonagle &amp; TCP_NAGLE_PUSH)</span><br><span class="line">        <span class="keyword">return</span> <span class="number">1</span>;</span><br><span class="line"></span><br><span class="line">    <span class="comment">/* Don't use the nagle rule for urgent data (or for the final FIN).</span><br><span class="line">     * Nagle can be ignored during F-RTO too (see RFC4138).</span><br><span class="line">     */</span></span><br><span class="line">    <span class="comment">//对紧急报文不使用NAGLE算法</span></span><br><span class="line">    <span class="keyword">if</span> (tcp_urg_mode(tp) || (tp-&gt;frto_counter == <span class="number">2</span>) ||</span><br><span class="line">        (TCP_SKB_CB(skb)-&gt;flags &amp; TCPCB_FLAG_FIN))</span><br><span class="line">        <span class="keyword">return</span> <span class="number">1</span>;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> (!tcp_nagle_check(tp, skb, cur_mss, nonagle))</span><br><span class="line">        <span class="keyword">return</span> <span class="number">1</span>;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">return</span> <span class="number">0</span>;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure></p>
+<p>tcp_nagle_check函数也在该源文件中：<br><figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">//该函数返回0代表允许发送，否则不通过</span></span><br><span class="line"><span class="function"><span class="keyword">static</span> <span class="keyword">inline</span> <span class="keyword">int</span> <span class="title">tcp_nagle_check</span><span class="params">(<span class="keyword">const</span> <span class="keyword">struct</span> tcp_sock *tp,</span><br><span class="line">                  <span class="keyword">const</span> <span class="keyword">struct</span> sk_buff *skb,</span><br><span class="line">                  <span class="keyword">unsigned</span> mss_now, <span class="keyword">int</span> nonagle)</span></span><br><span class="line"></span>&#123;</span><br><span class="line">    <span class="keyword">return</span> (skb-&gt;len &lt; mss_now &amp;&amp;</span><br><span class="line">        ((nonagle &amp; TCP_NAGLE_CORK) ||</span><br><span class="line">        <span class="comment">//判断是否有已发出去且未被确认的分组(packets_out）</span></span><br><span class="line">         (!nonagle &amp;&amp; tp-&gt;packets_out &amp;&amp; tcp_minshall_check(tp))));</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure></p>
+<p>再看看tcp_minshall_check函数：<br><figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">//该函数返回0表示允许发送</span></span><br><span class="line"><span class="function"><span class="keyword">static</span> <span class="keyword">inline</span> <span class="keyword">int</span> <span class="title">tcp_minshall_check</span><span class="params">(<span class="keyword">const</span> <span class="keyword">struct</span> tcp_sock *tp)</span></span><br><span class="line"></span>&#123;</span><br><span class="line">    <span class="comment">//上次发送的小报文未被确认</span></span><br><span class="line">    <span class="keyword">return</span> after(tp-&gt;snd_sml, tp-&gt;snd_una) &amp;&amp;</span><br><span class="line">    <span class="comment">//当前要发送的是未被确认的小报文之后的报文</span></span><br><span class="line">        !after(tp-&gt;snd_sml, tp-&gt;snd_nxt);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure></p>
+<p>可以看出，开启了NAGLE算法后，在上一个未被确认的小报文之后的小报文都是不允许发送的，直到上一个小报文被确认，或将多片数据合并成一个大于等于MSS的报文，才会被发送。</p>
+]]></content>
+    <summary type="html">
+    <![CDATA[<p>在TCP/IP网络协议栈中，数据的可靠传输、流量控制和拥塞控制均由传输层的TCP协议来负责。对上层应用层来说，TCP提供的是流式数据传输，而实际的传输细节却对上层透明。我们看看TCP收发消息到底经过了哪些过程。</p>
+<p>首先了解量两个概念：MTU和MSS。</p>
+<blockquote>
+<p>最大传输单元(Maximum Transmission Unit，MTU)是链路层的一个参数，是指一种通信协议的某一层上面所能通过的最大数据包大小（以字节为单位）。</p>
+</blockquote>
+<p>无论哪种数据链路，对该链路上网络分组的大小都会有限制，即MTU的值，例如最常见的以太网MTU为1500字节。当TCP层试图在以太网上发送报文段，调用IP层的方法时，会自动获取当前链路层的MTU，如果发现数据包长度大于MTU，则必须将数据包分片以达到要求，每个分片具有独立的IP报头，即可认为是独立的IP数据包。接收方根据IP报头，将所有IP数据包组成为一个TCP报文段。<br>如果一个TCP报文段的数据被分片成多个IP数据包，任何一个IP数据包丢失，则认为整个TCP报文段丢失，需要重新传输。这样做是很低效的，因此，传输层使用了另外一个参数MSS，尽量减少这种分片的产生。</p>]]>
+    
+    </summary>
+    
+      <category term="TCP/IP" scheme="http://yoursite.com/tags/TCP-IP/"/>
+    
+  </entry>
+  
+  <entry>
+    <title><![CDATA[浅谈TCP的backlog]]></title>
+    <link href="http://yoursite.com/2015/03/13/backlog-of-tcp-in-linux/"/>
+    <id>http://yoursite.com/2015/03/13/backlog-of-tcp-in-linux/</id>
+    <published>2015-03-13T14:13:19.000Z</published>
+    <updated>2015-03-14T04:27:11.487Z</updated>
+    <content type="html"><![CDATA[<p>在Linux/Unix下，应用程序调用<code>listen</code>系统调用进行监听时，需要指定一个int类型的backlog参数。<a href="http://linux.die.net/man/2/listen" target="_blank" rel="external">man手册</a>中的描述为:</p>
+<blockquote>
+<p>The backlog argument defines the maximum length to which the queue of pending connections for sockfd may grow</p>
+</blockquote>
+<p>通常可以理解为待建立的连接数上限。</p>
+<p>首先来回顾一下TCP建立连接过程的三次握手</p>
+<ol>
+<li>客户端调用connect，向服务器发送SYN报文，服务器收到后将该连接状态记录为<code>SYN Reveived</code>；</li>
+<li>服务器向客户端回复SYN/ACK报文；</li>
+<li>服务器收到客户端发送过来的ACK报文，该连接成功建立，状态为<code>ESTABLISHED</code>，等待应用程序调用accept。</li>
+</ol>
+<p>因此，服务器需要使用某种方式在保存当前所有待建立和已建立的连接信息，这就是真正意义上的backlog。</p>
+<a id="more"></a>
+<p>在Linux的TCP/IP协议栈实现中，backlog都是由2个队列来实现的:</p>
+<ol>
+<li><code>SYN队列</code>:服务器收到SYN报文后，将该连接放入SYN队列中，并回复SYN/ACK；</li>
+<li><code>ACCEPT队列</code>：服务器收到三次握手中的最后一个ACK后，将该连接从SYN队列移至ACCEPT队列，accept系统调用所做的只是从该队列中取出连接并创建套接字。</li>
+</ol>
+<p>从<a href="http://linux.die.net/man/2/listen" target="_blank" rel="external">man手册</a>中可以看出，在listen系统调用中，backlog参数指定的其实是ACCEPT队列的长度，而SYN队列的长度是作为一个系统参数，保存在/proc/sys/net/ipv4/tcp_max_syn_backlog文件中。</p>
+<p>考虑一下在什么情况下会导致队列变满:</p>
+<ul>
+<li>当应用程序调用accept的速率比连接建立完成的速率慢（如系统负载过高，或应用程序等待获取锁），会导致ACCEPT队列中元素增加，直至变满；</li>
+<li>当完成连接建立的速率比接收新的连接请求（即SYN报文）的速率慢（如网络延迟较高的情况下有大量连接请求），会导致SYN队列变满。</li>
+</ul>
+<hr>
+<p><strong><strong>ACCEPT队列满</strong></strong><br>首先考虑如下情况：</p>
+<blockquote>
+<p>服务器的ACCEPT队列已满之后，收到了SYN队列中某个客户端发来的ACK，即完成了三次握手</p>
+</blockquote>
+<p>收到ACK报文后的处理在内核net/ipv4/tcp_minisocks.c文件的tcp_check_req函数中，代码片段如下：</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br></pre></td><td class="code"><pre><span class="line">	<span class="comment">/* OK, ACK is valid, create big socket and</span><br><span class="line">	 * feed this segment to it. It will repeat all</span><br><span class="line">	 * the tests. THIS SEGMENT MUST MOVE SOCKET TO</span><br><span class="line">	 * ESTABLISHED STATE. If it will be dropped after</span><br><span class="line">	 * socket is created, wait for troubles.</span><br><span class="line">	 */</span></span><br><span class="line">	child = inet_csk(sk)-&gt;icsk_af_ops-&gt;syn_recv_sock(sk, skb, req, NULL);</span><br><span class="line">	<span class="keyword">if</span> (child == NULL)</span><br><span class="line">		<span class="keyword">goto</span> listen_overflow;</span><br><span class="line"></span><br><span class="line">	inet_csk_reqsk_queue_unlink(sk, req, prev);</span><br><span class="line">	inet_csk_reqsk_queue_removed(sk, req);</span><br><span class="line"></span><br><span class="line">	inet_csk_reqsk_queue_add(sk, req, child);</span><br><span class="line">	<span class="keyword">return</span> child;</span><br><span class="line"></span><br><span class="line">listen_overflow:</span><br><span class="line">	<span class="keyword">if</span> (!sysctl_tcp_abort_on_overflow) &#123;</span><br><span class="line">		inet_rsk(req)-&gt;acked = <span class="number">1</span>;</span><br><span class="line">		<span class="keyword">return</span> NULL;</span><br><span class="line">	&#125;</span><br><span class="line"></span><br><span class="line">embryonic_reset:</span><br><span class="line">	NET_INC_STATS_BH(sock_net(sk), LINUX_MIB_EMBRYONICRSTS);</span><br><span class="line">	<span class="keyword">if</span> (!(flg &amp; TCP_FLAG_RST))</span><br><span class="line">		req-&gt;rsk_ops-&gt;send_reset(sk, skb);</span><br><span class="line"></span><br><span class="line">	inet_csk_reqsk_queue_drop(sk, req, prev);</span><br><span class="line">	<span class="keyword">return</span> NULL;</span><br></pre></td></tr></table></figure>
+<p>syn_recv_sock函数在相同目录的tcp_ipv4.c文件中，该函数指针指向的是tcp_v4_syn_recv_sock函数，可以看到下面两条语句：<br><figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">if</span> (sk_acceptq_is_full(sk))</span><br><span class="line">	<span class="keyword">goto</span> exit_overflow;</span><br></pre></td></tr></table></figure></p>
+<p>exit_overflow代码如下：<br><figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">exit_overflow:</span><br><span class="line">	NET_INC_STATS_BH(sock_net(sk), LINUX_MIB_LISTENOVERFLOWS);</span><br><span class="line"><span class="built_in">exit</span>:</span><br><span class="line">	NET_INC_STATS_BH(sock_net(sk), LINUX_MIB_LISTENDROPS);</span><br><span class="line">	dst_release(dst);</span><br><span class="line">	<span class="keyword">return</span> NULL;</span><br></pre></td></tr></table></figure></p>
+<p>在内核检查到ACCEPT队列满了之后，直接执行exit_overflow标签之后的代码，虽然中间的代码我不太明白是什么意思，但是可以看到最后直接返回NULL。</p>
+<p>再回到最开始的tcp_check_req函数中，由于child变量，即syn_recv_sock函数返回的是NULL，直接跳转到listen_overflow之后的代码执行，当/proc/sys/net/ipv4/tcp_abort_on_overflow为0时，该函数只将acked标志位置为1，其他任何事情都不做，直接返回，该ACK报文相当于被丢弃；否则，如果设置了tcp_abort_on_overflow选项，则向客户端发送RST报文。</p>
+<p>随后，服务器发现，发出SYN/ACK之后迟迟未收到客户端的ACK（其实已经收到了，但是被自己给扔了！），根据TCP的超时重传机制，服务器再次向客户端发送SYN/ACK，客户端因此重新发送ACK。在多次重发之后(重试次数由/proc/sys/net/ipv4/tcp_synack_retries指定），如果还是未能将该连接放入ACCEPT队列，则最终服务器依然会发送RST报文，告知客户端连接失败。</p>
+<p>这个时候会有一个比较有意思的状态。客户端在接收到服务器发来的SYN/ACK时，就认为这个连接建立完成，随后可以在这个套接字上进行读写操作，发送过去的数据依然会被服务器忽略，然后继续重传；在服务器端，要么没有收到ACK，要么收到了ACK但是ACCEPT队列满导致无法放入，因此对于服务器来说，该连接处于SYN RECEIVED状态。当然，最终结果只有两种，服务器始终未在ACCEPT队列腾出空间，超出了/proc/sys/net/ipv4/tcp_synack_retries所指定的重试次数后发送RST，或腾出空间完成连接建立，接收数据。</p>
+<hr>
+<p>上面讨论的是服务器发送SYN/ACK之后的情况，事实上，当ACCEPT队列满了且SYN队列没满时，并非所有SYN请求都能够收到服务器的SYN/ACK。此时，内核会限制新来的连接请求，有一定概率丢弃客户端发送过来的SYN报文，以此来限制SYN队列的增长速度，防止SYN队列过快增长变满而导致客户端无法与服务器建立新的连接。由于客户端调用connect默认会重试3次，如果3次均没有得到服务器回复的SYN/ACK，则连接失败。</p>
+<hr>
+<p><strong><strong>SYN队列满</strong></strong><br>当SYN队列变满的情况较为简单。新的SYN请求将被直接丢弃。 由于TCP的超时重发机制，客户端会多次尝试SYN请求，直至超时（connect默认的超时时间是75s）。</p>
+<hr>
+<p><strong><strong>SYN flood</strong></strong><br>经过上面的讨论，有人可能就会想到，如果有人恶意发起大量SYN请求，收到服务器发送回来的SYN/ACK之后就不管了，那就会导致服务器的SYN队列迅速被占满，从而无法响应其他正常的连接请求了。是的，这就是所谓的<a href="http://en.wikipedia.org/wiki/SYN_flood" target="_blank" rel="external">SYN flood</a>。SYN flood是一种较为常见的DDOS攻击手段，而且目前还没有什么特别好的办法对付。服务器端可以更改系统参数，把SYN队列的容量调高，但是会占用更多的资源，但是对于规模较大的攻击也几乎无效。在SYN flood的WiKi中提到了一种叫<a href="http://en.wikipedia.org/wiki/SYN_cookies" target="_blank" rel="external">SYN cookies</a>的应对方法，下次有空再深入研究一下。</p>
+]]></content>
+    <summary type="html">
+    <![CDATA[<p>在Linux/Unix下，应用程序调用<code>listen</code>系统调用进行监听时，需要指定一个int类型的backlog参数。<a href="http://linux.die.net/man/2/listen">man手册</a>中的描述为:</p>
+<blockquote>
+<p>The backlog argument defines the maximum length to which the queue of pending connections for sockfd may grow</p>
+</blockquote>
+<p>通常可以理解为待建立的连接数上限。</p>
+<p>首先来回顾一下TCP建立连接过程的三次握手</p>
+<ol>
+<li>客户端调用connect，向服务器发送SYN报文，服务器收到后将该连接状态记录为<code>SYN Reveived</code>；</li>
+<li>服务器向客户端回复SYN/ACK报文；</li>
+<li>服务器收到客户端发送过来的ACK报文，该连接成功建立，状态为<code>ESTABLISHED</code>，等待应用程序调用accept。</li>
+</ol>
+<p>因此，服务器需要使用某种方式在保存当前所有待建立和已建立的连接信息，这就是真正意义上的backlog。</p>]]>
+    
+    </summary>
+    
+      <category term="TCP/IP" scheme="http://yoursite.com/tags/TCP-IP/"/>
+    
+  </entry>
+  
+</feed>
