@@ -4,7 +4,7 @@
   
   <link href="/atom.xml" rel="self"/>
   <link href="http://yoursite.com/"/>
-  <updated>2015-04-06T13:25:02.198Z</updated>
+  <updated>2015-04-06T13:27:53.011Z</updated>
   <id>http://yoursite.com/</id>
   
   <author>
@@ -19,7 +19,7 @@
     <link href="http://yoursite.com/2015/04/06/timer-and-timeout-in-tcp/"/>
     <id>http://yoursite.com/2015/04/06/timer-and-timeout-in-tcp/</id>
     <published>2015-04-06T13:21:51.000Z</published>
-    <updated>2015-04-06T13:25:02.198Z</updated>
+    <updated>2015-04-06T13:27:53.011Z</updated>
     <content type="html"><![CDATA[<p>最近重新翻阅了一下Stevens的《TCP/IP详解》，发现不少知识点之前没有理解透彻，或者过了太久已经没有印象了，因此决定花一些时间来整理和记录下来。</p>
 <h3 id="超时重传">超时重传</h3><p>在TCP中重传可能发生在2种情况下：<a href="http://en.wikipedia.org/wiki/Fast_retransmit" target="_blank" rel="external">快速重传</a>和超时重传。超时重传指的是，当发送到对方的报文段在一定超时时间之内，仍没有收到对方的Ack，则重新发送该报文段。<br>那么问题来了，超时时间是怎么决定的？如果超时时间太长，报文丢失之后很久才重发，效率和吞吐率太低；时间太短，可能某些报文只是延迟到达，并没有丢失，重传又会增加网络负载，可能造成网络拥塞。因此，在不同的网络环境下，甚至在相同网络的不同时间段下，均需要动态地计算超时时间。<br>通过<code>RTT（Round Trip Time）</code>可以大致决定，在多长时间之内没有收到Ack，则认为该报文丢失，并重传该报文。然而，网络环境随时在变化，我们没有办法准确的确定一个报文的RTT，只能通过多次采样来估算。</p>
 <h4 id="RTT的测量和估算">RTT的测量和估算</h4><p>为了尽量准确地估算下一次报文的RTT，TCP需要对已经发送出去报文的RTT进行采样。对于每个连接，在发送数据时，保证全局有一个定时器正在运行（如果发送数据时已经有定时器在运行，则不对该报文进行计时）。</p>
@@ -61,7 +61,7 @@
 <p>An important difference, however, is that a normal TCP never gives up sending window probes, whereas it may eventually give up trying to perform retransmissions</p>
 </blockquote>
 <p>发送方不会放弃窗口探测，但是从截图中可以看出，在接收方收到一定次数的窗口探测，而应用程序始终没有读取数据时，会向发送方发送RST报文重置连接。</p>
-<h3 id="保活定时器">保活定时器</h3><p>如果连接处于空闲状态，较长时间内没有进行数据交互，如果连接双方任意一方崩溃或发生故障（如掉电或网线拔出等情况，来不及向对端发送FIN或RST），对方是无法感知到的。如果对方确实已经发生故障，则应该关闭该连接，并回收相应的资源，对于并发连接数较大的服务器程序来说，这一点很重要。TCP使用<a href="http://en.wikipedia.org/wiki/Keepalive#TCP_keepalive" target="_blank" rel="external">保活定时器(Keep Alive Timer)</a>来做到这一点。<br>在默认情况下，TCP的保活定时器超时时间为2小时（在Linux下由/proc/sys/net/ipv4/tcp_keepalive_time文件指定），但是每次接收到来自对端发送过来报文，都会将该定时器复位。保活定时器的探测报文是不带任何数据，其中SYN字段比下一个发送的序列号小1。例如，如果本端下一次要发送的序列号为10（即对端上一次回复的Ack是10），那么这个探测报文的Ack是9。正是由于这个不正确的Ack，使得对端对该报文进行响应（该响应中Ack字段为10），表明它期望接收的是10而不是9。<br>保活探测报文也有超时时间和重传次数的，Linux下分别由/proc/sys/net/ipv4/tcp_keepalive_intvl和/proc/sys/net/ipv4/tcp_keepalive_probes指定，默认值分别为75s和9次。如果对方始终没有对该探测报文进行响应，就向对端发送RST报文，同时将该连接重置。</p>
+<h3 id="保活定时器">保活定时器</h3><p>如果连接处于空闲状态，较长时间内没有进行数据交互，如果连接双方任意一方崩溃或发生故障（如掉电或网线拔出等情况，来不及向对端发送FIN或RST），对方是无法感知到的。如果对方确实已经发生故障，则应该关闭该连接，并回收相应的资源，对于并发连接数较大的服务器程序来说，这一点很重要。TCP使用<a href="http://en.wikipedia.org/wiki/Keepalive#TCP_keepalive" target="_blank" rel="external">保活定时器(Keep Alive Timer)</a>来做到这一点。<br>在默认情况下，TCP的保活定时器超时时间为2小时（在Linux下由/proc/sys/net/ipv4/tcp_keepalive_time文件指定），但是每次接收到来自对端发送过来报文，都会将该定时器复位。保活定时器的探测报文是不带任何数据，其中SYN字段比下一个发送的序列号小1。例如，如果本端下一次要发送的序列号为10（即对端上一次回复的Ack是10），那么这个探测报文的Ack是9。正是由于这个不正确的Ack，使得对端对该报文进行响应（该响应中Ack字段为10），表明它期望接收的是10而不是9。<br>保活探测报文也有超时时间和重传次数的，Linux下分别由/proc/sys/net/ipv4/目录下的tcp_keepalive_intvl和tcp_keepalive_probes文件指定，默认值分别为75s和9次。如果对方始终没有对该探测报文进行响应，就向对端发送RST报文，同时将该连接重置。</p>
 ]]></content>
     <summary type="html">
     <![CDATA[<p>最近重新翻阅了一下Stevens的《TCP/IP详解》，发现不少知识点之前没有理解透彻，或者过了太久已经没有印象了，因此决定花一些时间来整理和记录下来。</p>
